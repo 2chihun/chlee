@@ -1,0 +1,3 @@
+FOR FIRST pt_mstr NO-LOCK:
+    DISP pt_mstr.pt_part.
+END.
