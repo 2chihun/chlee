@@ -33,12 +33,14 @@ extracted/
 !.env.example
 
 # AI Trader - generated/data files
+ai_trader/.venv/
 ai_trader/logs/
 ai_trader/backups/
 ai_trader/data/
 ai_trader/다운로드/
 ai_trader/tools/*.txt
 ai_trader/tools/*.log
+ai_trader/.pytest_cache/
 
 # Ginseng/Lens projects (별도 관리)
 ginseng_erp/

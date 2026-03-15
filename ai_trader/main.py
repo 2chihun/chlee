@@ -223,7 +223,7 @@ class AITrader:
             )
 
             result = self.executor.buy(stock_code, quantity, price)
-            if result and result.get("rt_cd") == "0":
+            if result and result.success:
                 session = self.db.get_session()
                 trade = Trade(
                     stock_code=stock_code,
@@ -264,7 +264,7 @@ class AITrader:
             )
 
             result = self.executor.sell(stock_code, quantity, price)
-            if result and result.get("rt_cd") == "0":
+            if result and result.success:
                 pnl = (price - buy_price) * quantity
                 pnl_pct = ((price / buy_price) - 1) * 100 if buy_price else 0
                 fee = int(price * quantity * 0.00015)
@@ -424,7 +424,11 @@ class AITrader:
         self._stop_event.set()
 
         if self.ws:
-            asyncio.get_event_loop().run_until_complete(self.ws.disconnect())
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.ws.disconnect())
+            except RuntimeError:
+                asyncio.run(self.ws.disconnect())
 
         logger.info("🛑 AI Trader 봇 정지 완료")
 

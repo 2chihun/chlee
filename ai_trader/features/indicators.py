@@ -95,7 +95,7 @@ def stochastic(df: pd.DataFrame, k_period: int = 14, d_period: int = 3):
 def obv(df: pd.DataFrame) -> pd.Series:
     """OBV (On Balance Volume)"""
     direction = np.sign(df["close"].diff())
-    direction.iloc[0] = 0
+    direction.iat[0] = 0
     return (direction * df["volume"]).cumsum()
 
 

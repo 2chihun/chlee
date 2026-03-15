@@ -203,10 +203,12 @@ class TestRiskManager(unittest.TestCase):
         rm = RiskManager(self.risk_config, self.db)
         rm._daily_pnl = 0
 
-        # 포지션 수 질의 모킹
+        # 포지션 수 질의 모킹 (filter_by().count() / filter_by().first() 모두 처리)
+        filter_mock = MagicMock()
+        filter_mock.count.return_value = 0
+        filter_mock.first.return_value = None
         query_mock = MagicMock()
-        query_mock.count.return_value = 0
-        query_mock.filter_by.return_value = MagicMock(first=MagicMock(return_value=None))
+        query_mock.filter_by.return_value = filter_mock
         self.session_mock.query.return_value = query_mock
 
         signal = Signal(

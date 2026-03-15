@@ -27,7 +27,18 @@ class RiskManager:
 
     @property
     def db(self):
-        """DB 세션을 반환합니다."""
+        """DB 세션을 반환합니다.
+
+        주의: 반환된 세션은 호출자가 close() 해야 합니다.
+        check_signal / record_daily_summary 등 내부 메서드는
+        _db_session() 컨텍스트 매니저를 사용하세요.
+        """
+        if hasattr(self._db, 'get_session'):
+            return self._db.get_session()
+        return self._db
+
+    def _get_session(self):
+        """세션을 반환합니다 (단일 진입점)."""
         if hasattr(self._db, 'get_session'):
             return self._db.get_session()
         return self._db
@@ -69,39 +80,46 @@ class RiskManager:
                 strategy_name=signal.strategy_name,
             )
 
-        # 2. 동시 보유 종목 수 확인
-        current_positions = self.db.query(Position).count()
-        if current_positions >= self.config.max_positions:
-            logger.warning("최대 보유 종목 수 도달: {}", current_positions)
-            return Signal(
-                type=SignalType.HOLD, stock_code=signal.stock_code,
-                price=signal.price,
-                reason=f"최대 보유 종목 수 도달: {current_positions}",
-                strategy_name=signal.strategy_name,
-            )
+        # 2~3. DB 조회 (세션 명시적 관리)
+        session = self._get_session()
+        try:
+            # 2. 동시 보유 종목 수 확인 (활성 포지션만)
+            current_positions = session.query(Position).filter_by(
+                is_active=True
+            ).count()
+            if current_positions >= self.config.max_positions:
+                logger.warning("최대 보유 종목 수 도달: {}", current_positions)
+                return Signal(
+                    type=SignalType.HOLD, stock_code=signal.stock_code,
+                    price=signal.price,
+                    reason=f"최대 보유 종목 수 도달: {current_positions}",
+                    strategy_name=signal.strategy_name,
+                )
 
-        # 3. 동일 종목 중복 매수 방지
-        existing = self.db.query(Position).filter_by(
-            stock_code=signal.stock_code
-        ).first()
-        if existing:
-            logger.warning("이미 보유 중인 종목: {}", signal.stock_code)
-            return Signal(
-                type=SignalType.HOLD, stock_code=signal.stock_code,
-                price=signal.price,
-                reason="이미 보유 중인 종목",
-                strategy_name=signal.strategy_name,
-            )
+            # 3. 동일 종목 중복 매수 방지 (활성 포지션만)
+            existing = session.query(Position).filter_by(
+                stock_code=signal.stock_code, is_active=True
+            ).first()
+            if existing:
+                logger.warning("이미 보유 중인 종목: {}", signal.stock_code)
+                return Signal(
+                    type=SignalType.HOLD, stock_code=signal.stock_code,
+                    price=signal.price,
+                    reason="이미 보유 중인 종목",
+                    strategy_name=signal.strategy_name,
+                )
 
-        # 3-1. 재무건전성 필터 (S-RIM 기반)
-        reject_reason = self._check_financial_filter(signal.stock_code)
-        if reject_reason:
-            logger.info("재무 필터 거부 [{}]: {}", signal.stock_code, reject_reason)
-            return Signal(
-                type=SignalType.HOLD, stock_code=signal.stock_code,
-                price=signal.price, reason=reject_reason,
-                strategy_name=signal.strategy_name,
-            )
+            # 3-1. 재무건전성 필터 (S-RIM 기반)
+            reject_reason = self._check_financial_filter(signal.stock_code, session)
+            if reject_reason:
+                logger.info("재무 필터 거부 [{}]: {}", signal.stock_code, reject_reason)
+                return Signal(
+                    type=SignalType.HOLD, stock_code=signal.stock_code,
+                    price=signal.price, reason=reject_reason,
+                    strategy_name=signal.strategy_name,
+                )
+        finally:
+            session.close()
 
         # 4. 포지션 사이징
         max_amount = min(self.config.max_position_size, available_cash)
@@ -207,7 +225,7 @@ class RiskManager:
 
         self.db.commit()
 
-    def _check_financial_filter(self, stock_code: str) -> Optional[str]:
+    def _check_financial_filter(self, stock_code: str, session=None) -> Optional[str]:
         """재무건전성 필터를 검사합니다.
 
         RiskConfig의 min_roe, require_profitable, max_debt_ratio 설정에 따라
@@ -222,13 +240,21 @@ class RiskManager:
                 and self.config.max_debt_ratio <= 0):
             return None
 
-        # 최근 재무 데이터 조회
-        fin = (
-            self.db.query(FinancialData)
-            .filter_by(stock_code=stock_code)
-            .order_by(FinancialData.fiscal_year.desc())
-            .first()
-        )
+        # 최근 재무 데이터 조회 (호출자 세션 재사용, 없으면 새 세션)
+        own_session = session is None
+        if own_session:
+            session = self._get_session()
+        try:
+            fin = (
+                session.query(FinancialData)
+                .filter_by(stock_code=stock_code)
+                .order_by(FinancialData.fiscal_year.desc())
+                .first()
+            )
+        finally:
+            if own_session:
+                session.close()
+                session = None
 
         if fin is None:
             # 재무 데이터 없으면 필터 통과 (데이터 미수집 상태 허용)
