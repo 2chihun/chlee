@@ -1,0 +1,52 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run PDF Study Full",
+			"type": "shell",
+			"command": "C:/Copilot/.venv/Scripts/python.exe",
+			"args": [
+				"C:/Copilot/pdf_study_pipeline.py",
+				"--input",
+				"D:/-/Progress DOC V9.1E and WebSpeed 3.1E PDF",
+				"--output",
+				"C:/Copilot/study_output_20260307_final2",
+				"--pdf-timeout",
+				"180"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Run PDF Study Probe",
+			"type": "shell",
+			"command": "C:/Copilot/.venv/Scripts/python.exe",
+			"args": [
+				"C:/Copilot/pdf_study_pipeline.py",
+				"--input",
+				"D:/-/Progress DOC V9.1E and WebSpeed 3.1E PDF",
+				"--output",
+				"C:/Copilot/study_output_20260307_probe2",
+				"--max-files",
+				"1",
+				"--pdf-timeout",
+				"300"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Run PDF Study Full Final",
+			"type": "shell",
+			"command": "C:/Copilot/.venv/Scripts/python.exe",
+			"args": [
+				"C:/Copilot/pdf_study_pipeline.py",
+				"--input",
+				"D:/-/Progress DOC V9.1E and WebSpeed 3.1E PDF",
+				"--output",
+				"C:/Copilot/study_output_20260307_final2",
+				"--pdf-timeout",
+				"300"
+			],
+			"isBackground": false
+		}
+	]
+}

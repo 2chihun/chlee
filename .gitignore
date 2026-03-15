@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Logs
+*.log
+
+# Images / Screenshots
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# Study output directories (generated)
+study_output*/
+study_batches/
+study_records/
+delivery_*/
+extracted/
+
+# Secrets
+.env
+*.env
+!.env.example
+
+# AI Trader - generated/data files
+ai_trader/logs/
+ai_trader/backups/
+ai_trader/data/
+ai_trader/다운로드/
+ai_trader/tools/*.txt
+ai_trader/tools/*.log
+
+# Ginseng/Lens projects (별도 관리)
+ginseng_erp/
+lens_wholesale/
+
+# OS
+.DS_Store
+Thumbs.db
