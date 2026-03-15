@@ -367,15 +367,24 @@ def _create_mss():
 def _safe_capture(sct, win, monitor):
     """캡처를 시도하고, 실패 시 mss 핸들을 재생성하여 재시도합니다.
 
+    Args:
+        sct: mss 인스턴스
+        win: 창 객체 (monitor=0 일 때 필수, monitor>0 이면 None 허용)
+        monitor: 모니터 번호 (0=창 영역, 1+=해당 모니터 전체)
+
     Returns:
         (img, sct): 캡처된 이미지와 (갱신된) mss 인스턴스
     """
-    try:
+    if monitor == 0 and win is None:
+        raise ValueError("monitor=0 (창 영역 캡처) 시 win 객체가 필요합니다.")
+
+    def _do_capture(sct_inst):
         if monitor > 0:
-            img = capture_fullscreen(sct, monitor=monitor)
-        else:
-            img = capture_window(win, sct)
-        return img, sct
+            return capture_fullscreen(sct_inst, monitor=monitor)
+        return capture_window(win, sct_inst)
+
+    try:
+        return _do_capture(sct), sct
     except Exception:
         # mss 핸들이 무효화된 경우 재생성
         print(f"  🔄 캡처 핸들 재생성 중...")
@@ -385,11 +394,7 @@ def _safe_capture(sct, win, monitor):
             pass
         sct = _create_mss()
         time.sleep(0.5)
-        if monitor > 0:
-            img = capture_fullscreen(sct, monitor=monitor)
-        else:
-            img = capture_window(win, sct)
-        return img, sct
+        return _do_capture(sct), sct
 
 
 def run_book_capture(
@@ -516,6 +521,11 @@ def run_book_capture(
     MAX_ERRORS = 10         # 연속 오류 한도
     window_lost_count = 0   # 연속 창 소실 카운터
     MAX_WINDOW_LOST = 15    # 연속 창 소실 한도
+    last_rest_count = -1    # 마지막 휴식 시 count (중복 휴식 방지)
+    # 되돌아감 감지 허용 거리: 이 값보다 먼 과거 페이지와 일치 시 되돌아감으로 판단
+    ROLLBACK_DISTANCE = 3
+    # safe_kw 미리 계산 (루프 내 반복 계산 방지)
+    safe_kw = re.sub(r'[^\w]', '', title_keyword)[:10]
 
     sct = _create_mss()
     try:
@@ -525,7 +535,6 @@ def run_book_capture(
         all_hashes[str(prev_hash)] = 0
         count += 1
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_kw = re.sub(r'[^\w]', '', title_keyword)[:10]
         filename = f"book_{safe_kw}_{ts}_{count:04d}.png"
         filepath = out / filename
         img.save(str(filepath), "PNG", optimize=True)
@@ -540,8 +549,11 @@ def run_book_capture(
                 print(f"\n  ⏹️  Ctrl+Alt+Shift+E 단축키로 중단됨")
                 break
 
-            # 휴식 삽입 (rest_interval 페이지마다)
-            if rest_interval > 0 and count > 0 and count % rest_interval == 0:
+            # 휴식 삽입 (rest_interval 페이지마다, 중복 트리거 방지)
+            if (rest_interval > 0 and count > 0
+                    and count % rest_interval == 0
+                    and count != last_rest_count):
+                last_rest_count = count
                 print(f"  ☕ {count}페이지 도달 → {rest_seconds}초 휴식 중...")
                 time.sleep(rest_seconds)
 
@@ -593,18 +605,17 @@ def run_book_capture(
                     continue
 
                 # 되돌아감 감지 (해시 충돌 오탐 방지 개선)
-                # hash → 최초 페이지번호 매핑, 인접 페이지(2장 이내) 충돌은 무시
+                # hash → 최초 페이지번호 매핑, 인접 페이지(ROLLBACK_DISTANCE 이내) 충돌은 무시
                 curr_hash_str = str(curr_hash)
                 if curr_hash_str in all_hashes:
                     prev_seen_at = all_hashes[curr_hash_str]
-                    # 먼 과거 페이지(3장 이상 차이)와 일치 → 진짜 되돌아감
-                    if count - prev_seen_at > 2:
+                    if count - prev_seen_at > ROLLBACK_DISTANCE:
                         print(f"\n  ⚠️  페이지 되돌아감 감지! (#{prev_seen_at + 1} 페이지와 일치)")
                         print(f"     {count}페이지까지 캡처 후 자동 중단합니다.")
                         break
                     else:
                         # 인접 페이지 해시 충돌 → 무시하고 계속 진행
-                        print(f"  ⚠️  해시 유사 (#{prev_seen_at + 1}), 충돌 가능성 → 계속 진행")
+                        print(f"  ⚠️  해시 유사 (#{prev_seen_at + 1}↔#{count + 1}), 충돌 가능성 → 계속 진행")
 
                 # 변경됨 → 저장
                 prev_hash = curr_hash
@@ -614,7 +625,6 @@ def run_book_capture(
                 consecutive_errors = 0
                 count += 1
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                safe_kw = re.sub(r'[^\w]', '', title_keyword)[:10]
                 filename = f"book_{safe_kw}_{ts}_{count:04d}.png"
                 filepath = out / filename
                 img.save(str(filepath), "PNG", optimize=True)
@@ -742,8 +752,9 @@ def main():
                         help="저장 폴더 (기본: captures)")
     parser.add_argument("--fullscreen", "-f", action="store_true",
                         help="전체 화면 캡처")
-    parser.add_argument("--monitor", "-m", type=int, default=1,
-                        help="캡처할 모니터 번호 (0=가상전체, 1=주모니터, 2+=보조, 기본: 1)")
+    parser.add_argument("--monitor", "-m", type=int, default=None,
+                        help="캡처할 모니터 번호 (0=창영역/가상전체, 1=주모니터, 2+=보조; "
+                             "--book 기본:0(창영역), 일반 기본:1(주모니터))")
     parser.add_argument("--ocr", action="store_true",
                         help="OCR 텍스트 추출 (Tesseract 필요)")
     parser.add_argument("--quality", "-q", type=int, default=90,
@@ -790,6 +801,8 @@ def main():
         return
 
     if args.book:
+        # --book 모드: monitor 미지정 시 0(창 영역) 사용
+        book_monitor = args.monitor if args.monitor is not None else 0
         run_book_capture(
             title_keyword=args.title,
             click_min=args.click_min,
@@ -797,12 +810,14 @@ def main():
             max_count=args.count,
             output_dir=args.output,
             dedup_threshold=args.dedup_threshold,
-            monitor=args.monitor,
+            monitor=book_monitor,
             rest_interval=args.rest_interval,
             rest_seconds=args.rest_seconds,
         )
         return
 
+    # 일반 캡처 모드: monitor 미지정 시 1(주모니터) 사용
+    cap_monitor = args.monitor if args.monitor is not None else 1
     run_capture(
         title_keyword=args.title,
         interval=args.interval,
@@ -811,7 +826,7 @@ def main():
         fullscreen=args.fullscreen,
         ocr=args.ocr,
         quality=args.quality,
-        monitor=args.monitor,
+        monitor=cap_monitor,
     )
 
 
