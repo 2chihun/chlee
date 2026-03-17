@@ -69,6 +69,13 @@ try:
 except ImportError:
     _HAS_VALUE_INVESTOR = False
 
+# 이남우 주식 품질 평가 모듈 (없으면 무시)
+try:
+    from features.stock_quality import StockQualityAnalyzer, StockQualitySignal
+    _HAS_STOCK_QUALITY = True
+except ImportError:
+    _HAS_STOCK_QUALITY = False
+
 
 class SwingStrategy(BaseStrategy):
     """일중 스윙 전략
@@ -150,6 +157,18 @@ class SwingStrategy(BaseStrategy):
         else:
             self._value_analyzer = None
         self._last_value: Optional["ValueInvestorSignal"] = None
+        # 이남우 주식 품질 분석기 초기화
+        if _HAS_STOCK_QUALITY:
+            self._quality_analyzer = StockQualityAnalyzer(
+                roe_lookback=merged.get("quality_roe_lookback", 120),
+                panic_threshold=merged.get("quality_panic_threshold", 0.30),
+                panic_lookback=merged.get("quality_panic_lookback", 252),
+                intensity_lookback=merged.get("quality_intensity_lookback", 60),
+                high_atr_pct=merged.get("quality_high_atr_pct", 0.04),
+            )
+        else:
+            self._quality_analyzer = None
+        self._last_quality: Optional["StockQualitySignal"] = None
 
     def analyze(self, df: pd.DataFrame) -> pd.DataFrame:
         """데이터에 스윙 전략 지표를 추가합니다."""
@@ -266,6 +285,18 @@ class SwingStrategy(BaseStrategy):
                 result["value_fundamental"] = value_sig.fundamental_score
                 result["value_valuation"] = value_sig.valuation_score
                 result["value_contrarian"] = value_sig.contrarian_score
+        except Exception:
+            pass
+
+        # 이남우 주식 품질 분석 (ROE 듀폰, 패닉매수, 자본집약도)
+        try:
+            if _HAS_STOCK_QUALITY and self._quality_analyzer is not None:
+                quality_sig = self._quality_analyzer.analyze(result)
+                self._last_quality = quality_sig
+                result["quality_score"] = quality_sig.quality_score
+                result["quality_roe"] = quality_sig.roe_quality
+                result["quality_panic"] = int(quality_sig.is_panic_buy)
+                result["quality_intensity"] = quality_sig.capital_intensity
         except Exception:
             pass
 
@@ -566,6 +597,43 @@ class SwingStrategy(BaseStrategy):
                 return Signal(
                     type=SignalType.HOLD, stock_code=stock_code, price=price,
                     reason="고평가 경고 (강방천&존리: 쌀때 사라)",
+                    strategy_name=self.name,
+                )
+
+            # --------------------------------------------------------
+            # 이남우 주식 품질 필터
+            # 저품질 종목: 신뢰도 감소
+            # 패닉 매수 기회: 신뢰도 +15%
+            # 자본집약적 종목: 신뢰도 감소
+            # --------------------------------------------------------
+            quality_block = False
+            try:
+                if _HAS_STOCK_QUALITY and self._last_quality is not None:
+                    qs = self._last_quality
+                    if qs.confidence_delta != 0:
+                        confidence += qs.confidence_delta
+                    if qs.quality_score < 0.3:
+                        quality_block = True
+                        logger.info(
+                            "[품질필터] 저품질 종목(score={:.2f}) → 매수 보류",
+                            qs.quality_score
+                        )
+                    elif qs.is_panic_buy:
+                        confidence += 0.15
+                        reasons.append(
+                            f"패닉매수기회(하락{qs.panic_depth:.0%})"
+                        )
+                    if qs.capital_intensity > 0.7 and not quality_block:
+                        reasons.append(
+                            f"자본집약({qs.capital_intensity:.2f})"
+                        )
+            except Exception:
+                pass
+
+            if quality_block:
+                return Signal(
+                    type=SignalType.HOLD, stock_code=stock_code, price=price,
+                    reason="저품질 종목 (이남우: 나쁜 주식 회피)",
                     strategy_name=self.name,
                 )
 

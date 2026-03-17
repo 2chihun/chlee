@@ -268,6 +268,30 @@ class ValueInvestorConfig:
 
 
 @dataclass
+class StockQualityConfig:
+    """이남우 "좋은 주식 나쁜 주식" 설정
+
+    주식 품질 평가, 패닉 매수 감지, 자본집약도 분석 설정.
+    """
+    # ROE 듀폰 프록시
+    roe_lookback: int = 120              # 분석 기간 (거래일)
+    # 패닉 매수
+    panic_threshold: float = 0.30        # 52주 고점 대비 하락률 기준 (30%)
+    panic_lookback: int = 252            # 52주 고점 탐색 기간
+    min_quality_for_panic: float = 0.5   # 패닉 매수 최소 품질 점수
+    # 자본집약도
+    intensity_lookback: int = 60         # 자본집약도 분석 기간
+    high_atr_pct: float = 0.04           # 고변동 기준 (ATR/가격 4%)
+    # 포지션 조정 범위
+    max_position_multiplier: float = 1.4  # 최대 포지션 배수
+    min_position_multiplier: float = 0.6  # 최소 포지션 배수
+    # 기능 활성화
+    use_quality_filter: bool = True      # 품질 필터 사용
+    use_panic_buy: bool = True           # 패닉 매수 감지 사용
+    use_capital_intensity: bool = True   # 자본집약도 분석 사용
+
+
+@dataclass
 class BackupConfig:
     """백업 설정"""
     backup_dir: str = str(BASE_DIR / "backups")
@@ -291,6 +315,7 @@ class AppConfig:
     wizard: WizardConfig = field(default_factory=WizardConfig)
     ken_fisher: KenFisherConfig = field(default_factory=KenFisherConfig)
     value_investor: ValueInvestorConfig = field(default_factory=ValueInvestorConfig)
+    stock_quality: StockQualityConfig = field(default_factory=StockQualityConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
     log_level: str = "INFO"
     api_host: str = "0.0.0.0"

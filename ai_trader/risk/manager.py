@@ -566,14 +566,31 @@ class RiskManager:
                 pass
             multiplier *= value_multiplier
 
+            # 3-3. 이남우 주식 품질 분석 연동
+            quality_multiplier = 1.0
+            quality_note = ""
+            try:
+                from features.stock_quality import StockQualityAnalyzer
+                quality_analyzer = StockQualityAnalyzer()
+                quality_sig = quality_analyzer.analyze(df)
+                quality_multiplier = quality_sig.position_multiplier
+                quality_note = f"품질배수={quality_multiplier:.2f}"
+                if quality_sig.note:
+                    quality_note += f"({quality_sig.note[:40]})"
+            except Exception:
+                pass
+            multiplier *= quality_multiplier
+
             # 극단 회피: 배수 하한 0.3, 상한 1.3
             multiplier = round(float(max(min(multiplier, 1.3), 0.3)), 2)
             adjusted_max = int(base_max_position * multiplier)
 
             fisher_part = f" | {fisher_note}" if fisher_note else ""
             value_part = f" | {value_note}" if value_note else ""
+            quality_part = f" | {quality_note}" if quality_note else ""
             note = (
-                f"{cycle_note} | {credit_note}{fisher_part}{value_part} | "
+                f"{cycle_note} | {credit_note}{fisher_part}"
+                f"{value_part}{quality_part} | "
                 f"배수={multiplier:.2f} | "
                 f"공포기회={is_fear_opportunity}"
             )
