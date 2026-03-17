@@ -274,6 +274,12 @@ class SwingStrategy(BaseStrategy):
                 result["fisher_pos_mult"] = fisher_sig.position_multiplier
                 result["fisher_vol_fear"] = fisher_sig.volatility_fear_score
                 result["fisher_wow"] = fisher_sig.wall_of_worry_score
+                result["fisher_v_shape"] = fisher_sig.v_shape_score
+                result["fisher_early_bull"] = fisher_sig.early_bull_phase
+                result["fisher_extreme_distrust"] = (
+                    fisher_sig.extreme_distrust
+                )
+                result["fisher_exp_12m"] = fisher_sig.expected_12m_return
         except Exception:
             pass
 
@@ -550,6 +556,9 @@ class SwingStrategy(BaseStrategy):
             # Wall of Worry(불신 비관론) → 신뢰도 부스트
             # 변동성 공포 극단 → 기회 신호
             # 약세장 회복 초기 → 신뢰도 부스트
+            # V자 회복 대칭성 → 신뢰도 부스트 (신규)
+            # 강세장 초기 → 신뢰도 대폭 부스트 (신규)
+            # 극단 비관론 축적 → 역발상 매수 신호 (신규)
             # --------------------------------------------------------
             try:
                 if _HAS_MARKET_MEMORY and self._last_fisher is not None:
@@ -563,6 +572,19 @@ class SwingStrategy(BaseStrategy):
                         # 과도한 안정(버블 전조): 신뢰도 소폭 감소
                         confidence -= 0.05
                         reasons.append("시장기억경고")
+                    # 강세장 초기: 역사적 최대 기회 (+23.1%/3개월, +46.6%/12개월)
+                    if fs.early_bull_phase:
+                        confidence += 0.10
+                        reasons.append("강세장초기(켄피셔:12개월+46.6%역사평균)")
+                    # 극단 비관론 축적: "이번에도 다르지 않다" 역발상
+                    if fs.extreme_distrust:
+                        confidence += 0.08
+                        reasons.append("이번엔다르다착각(켄피셔:역발상매수)")
+                    # V자 회복 대칭성 강함
+                    if fs.v_shape_score > 0.7:
+                        reasons.append(
+                            f"V자회복대칭({fs.v_shape_score:.2f})"
+                        )
             except Exception:
                 pass
 
