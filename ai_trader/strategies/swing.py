@@ -76,6 +76,13 @@ try:
 except ImportError:
     _HAS_STOCK_QUALITY = False
 
+# 서준식 딥밸류/채권형 주식 분석 모듈 (없으면 무시)
+try:
+    from features.deep_value import SeoJunsikAnalyzer, SeoJunsikSignal
+    _HAS_DEEP_VALUE = True
+except ImportError:
+    _HAS_DEEP_VALUE = False
+
 
 class SwingStrategy(BaseStrategy):
     """일중 스윙 전략
@@ -169,6 +176,20 @@ class SwingStrategy(BaseStrategy):
         else:
             self._quality_analyzer = None
         self._last_quality: Optional["StockQualitySignal"] = None
+
+        # 서준식 딥밸류 분석기 초기화
+        if _HAS_DEEP_VALUE:
+            self._deep_value_analyzer = SeoJunsikAnalyzer(
+                lookback=merged.get("deep_value_lookback", 252),
+                target_return=merged.get("deep_value_target_return", 0.15),
+                bond_type_threshold=merged.get("deep_value_bond_threshold", 0.5),
+                safety_margin_threshold=merged.get("deep_value_safety_threshold", 0.5),
+                deep_value_threshold=merged.get("deep_value_threshold", 0.60),
+                overvalue_threshold=merged.get("deep_value_overvalue_threshold", 0.30),
+            )
+        else:
+            self._deep_value_analyzer = None
+        self._last_deep_value: Optional["SeoJunsikSignal"] = None
 
     def analyze(self, df: pd.DataFrame) -> pd.DataFrame:
         """데이터에 스윙 전략 지표를 추가합니다."""
@@ -303,6 +324,19 @@ class SwingStrategy(BaseStrategy):
                 result["quality_roe"] = quality_sig.roe_quality
                 result["quality_panic"] = int(quality_sig.is_panic_buy)
                 result["quality_intensity"] = quality_sig.capital_intensity
+        except Exception:
+            pass
+
+        # 서준식 딥밸류 분석 (채권형주식, 기대수익률, 안전마진, 떨어지는칼날)
+        try:
+            if _HAS_DEEP_VALUE and self._deep_value_analyzer is not None:
+                dv_sig = self._deep_value_analyzer.analyze(result)
+                self._last_deep_value = dv_sig
+                result["deep_value_bond_type"] = dv_sig.bond_type_score
+                result["deep_value_expected_return"] = dv_sig.expected_return
+                result["deep_value_safety_margin"] = dv_sig.safety_margin_score
+                result["deep_value_falling_knife"] = dv_sig.falling_knife_score
+                result["deep_value_buy_candidate"] = int(dv_sig.is_buy_candidate)
         except Exception:
             pass
 
@@ -656,6 +690,43 @@ class SwingStrategy(BaseStrategy):
                 return Signal(
                     type=SignalType.HOLD, stock_code=stock_code, price=price,
                     reason="저품질 종목 (이남우: 나쁜 주식 회피)",
+                    strategy_name=self.name,
+                )
+
+            # --------------------------------------------------------
+            # 서준식 딥밸류/채권형 주식 필터
+            # 고평가: 매수 차단
+            # 매수 후보(기대수익률≥15%): 신뢰도 +12%
+            # 떨어지는 칼날(우량주 급락): 신뢰도 +10%
+            # --------------------------------------------------------
+            deep_value_block = False
+            try:
+                if _HAS_DEEP_VALUE and self._last_deep_value is not None:
+                    dv = self._last_deep_value
+                    if dv.confidence_delta != 0:
+                        confidence += dv.confidence_delta
+                        reasons.append(f"딥밸류({dv.confidence_delta:+.2f})")
+                    if dv.is_buy_candidate:
+                        reasons.append(
+                            f"매수후보(기대{dv.expected_return:.0%})"
+                        )
+                    if dv.falling_knife_score > 0.6:
+                        reasons.append(
+                            f"칼날잡기({dv.falling_knife_score:.2f})"
+                        )
+                    if dv.is_overvalued:
+                        deep_value_block = True
+                        logger.info(
+                            "[딥밸류필터] 고평가(bond=%.2f,margin=%.2f) → 매수 보류",
+                            dv.bond_type_score, dv.safety_margin_score
+                        )
+            except Exception:
+                pass
+
+            if deep_value_block:
+                return Signal(
+                    type=SignalType.HOLD, stock_code=stock_code, price=price,
+                    reason="고평가 종목 (서준식: 안전마진 부족)",
                     strategy_name=self.name,
                 )
 

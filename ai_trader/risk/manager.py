@@ -581,6 +581,21 @@ class RiskManager:
                 pass
             multiplier *= quality_multiplier
 
+            # 3-4. 서준식 딥밸류 분석 연동
+            deep_value_multiplier = 1.0
+            deep_value_note = ""
+            try:
+                from features.deep_value import SeoJunsikAnalyzer
+                dv_analyzer = SeoJunsikAnalyzer()
+                dv_sig = dv_analyzer.analyze(df)
+                deep_value_multiplier = dv_sig.position_multiplier
+                deep_value_note = f"딥밸류배수={deep_value_multiplier:.2f}"
+                if dv_sig.note:
+                    deep_value_note += f"({dv_sig.note[:40]})"
+            except Exception:
+                pass
+            multiplier *= deep_value_multiplier
+
             # 극단 회피: 배수 하한 0.3, 상한 1.3
             multiplier = round(float(max(min(multiplier, 1.3), 0.3)), 2)
             adjusted_max = int(base_max_position * multiplier)
@@ -588,9 +603,10 @@ class RiskManager:
             fisher_part = f" | {fisher_note}" if fisher_note else ""
             value_part = f" | {value_note}" if value_note else ""
             quality_part = f" | {quality_note}" if quality_note else ""
+            deep_value_part = f" | {deep_value_note}" if deep_value_note else ""
             note = (
                 f"{cycle_note} | {credit_note}{fisher_part}"
-                f"{value_part}{quality_part} | "
+                f"{value_part}{quality_part}{deep_value_part} | "
                 f"배수={multiplier:.2f} | "
                 f"공포기회={is_fear_opportunity}"
             )

@@ -292,6 +292,23 @@ class StockQualityConfig:
 
 
 @dataclass
+class SeoJunsikConfig:
+    """서준식 "다시 쓰는 주식투자 교과서" 설정
+
+    채권형 주식 식별, 기대수익률 산출, 안전마진 평가, 떨어지는 칼날 감지.
+    """
+    lookback: int = 252                    # 분석 기간 (거래일, 약 1년)
+    target_return: float = 0.15            # 목표 수익률 15% (버핏 기준)
+    bond_type_threshold: float = 0.5       # 채권형 주식 임계값
+    safety_margin_threshold: float = 0.5   # 안전마진 임계값
+    deep_value_threshold: float = 0.60     # 딥밸류 복합 임계값
+    overvalue_threshold: float = 0.30      # 고평가 차단 임계값
+    max_position_multiplier: float = 1.3   # 최대 포지션 배수
+    min_position_multiplier: float = 0.7   # 최소 포지션 배수
+    use_deep_value: bool = True            # 딥밸류 필터 사용
+
+
+@dataclass
 class BackupConfig:
     """백업 설정"""
     backup_dir: str = str(BASE_DIR / "backups")
@@ -316,6 +333,7 @@ class AppConfig:
     ken_fisher: KenFisherConfig = field(default_factory=KenFisherConfig)
     value_investor: ValueInvestorConfig = field(default_factory=ValueInvestorConfig)
     stock_quality: StockQualityConfig = field(default_factory=StockQualityConfig)
+    seo_junsik: SeoJunsikConfig = field(default_factory=SeoJunsikConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
     log_level: str = "INFO"
     api_host: str = "0.0.0.0"
