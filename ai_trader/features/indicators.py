@@ -174,6 +174,30 @@ def _merge_levels(levels: list[float], tolerance: float) -> list[float]:
     return merged
 
 
+def add_execution_strength(df: pd.DataFrame, period: int = 20) -> pd.DataFrame:
+    """체결강도 = 매수체결량/매도체결량 * 100
+    도서 p.88: "거래량이 대량으로 터져야 하며, 연속 체결로 주가의 체결강도가 강해져야 한다"
+    간이 계산: 양봉 거래량 누적 / 음봉 거래량 누적 * 100 (period 기간)
+    """
+    result = df.copy()
+    is_bullish = result["close"] >= result["open"]
+    bull_vol = result["volume"].where(is_bullish, 0.0)
+    bear_vol = result["volume"].where(~is_bullish, 0.0)
+    bull_sum = bull_vol.rolling(window=period, min_periods=1).sum()
+    bear_sum = bear_vol.rolling(window=period, min_periods=1).sum()
+    result["execution_strength"] = bull_sum / bear_sum.replace(0, np.nan) * 100
+    return result
+
+
+def add_volume_spike(df: pd.DataFrame, threshold: float = 2.5) -> pd.DataFrame:
+    """거래량 급증 감지 - 평균 대비 threshold 배 이상이면 1
+    도서: 대량 거래 발생 시 추세 전환 가능성"""
+    result = df.copy()
+    avg_vol = result["volume"].rolling(window=20, min_periods=1).mean()
+    result["volume_spike"] = (result["volume"] > avg_vol * threshold).astype(int)
+    return result
+
+
 def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """DataFrame에 모든 기술적 지표를 추가합니다.
 
@@ -225,5 +249,11 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     # MFI
     result["mfi"] = mfi(result)
+
+    # 체결강도
+    result = add_execution_strength(result)
+
+    # 거래량 급증 감지
+    result = add_volume_spike(result)
 
     return result

@@ -11,6 +11,7 @@ from loguru import logger
 from strategies.base import BaseStrategy, Signal, SignalType
 from features.indicators import (
     rsi, bollinger_bands, macd, vwap, volume_ratio, ema, atr,
+    add_execution_strength, add_volume_spike,
 )
 
 
@@ -81,6 +82,18 @@ class ScalpingStrategy(BaseStrategy):
         # ATR (손절/익절 동적 산출용)
         result["atr"] = atr(result, 14)
 
+        # 체결강도 (도서 p.88: 체결강도가 강해져야 한다)
+        try:
+            result = add_execution_strength(result)
+        except Exception:
+            result["execution_strength"] = 100.0
+
+        # 거래량 급증 감지
+        try:
+            result = add_volume_spike(result)
+        except Exception:
+            result["volume_spike"] = 0
+
         # 시그널 컬럼
         result["signal"] = SignalType.HOLD.value
         result = self._generate_signals(result)
@@ -98,15 +111,29 @@ class ScalpingStrategy(BaseStrategy):
         buy_volume = df["vol_ratio"] > p["min_volume_ratio"]
         buy_vwap = df["close"] <= df["vwap"] * 1.005  # VWAP 근처
 
-        # 매수: (RSI 조건 OR BB 조건) AND MACD 양전환 AND 거래량
-        buy_signal = (buy_rsi | buy_bb) & buy_macd & buy_volume
+        # 체결강도 > 100: 매수세 확인 (도서 p.88)
+        buy_exec_strength = df["execution_strength"] > 100 if "execution_strength" in df.columns else True
+        # 거래량 급증 감지
+        buy_vol_spike = df["volume_spike"] == 1 if "volume_spike" in df.columns else False
+
+        # 매수: (RSI 조건 AND 체결강도 OR BB 조건) AND MACD 양전환 AND (거래량 OR 급증)
+        buy_signal = (
+            ((buy_rsi & buy_exec_strength) | buy_bb)
+            & buy_macd
+            & (buy_volume | buy_vol_spike)
+        )
 
         # 매도 조건
         sell_rsi = df["rsi"] > p["rsi_sell"]
         sell_bb = df["bb_pctb"] > 0.95  # 볼린저 상단 근접
         sell_macd = (df["macd_hist"] < 0) & (df["macd_hist"].shift(1) >= 0)  # 음전환
 
-        sell_signal = sell_rsi | (sell_bb & sell_macd)
+        # 체결강도 < 80 이고 RSI > 60이면 매도 신호 강화
+        sell_exec_weak = pd.Series(False, index=df.index)
+        if "execution_strength" in df.columns:
+            sell_exec_weak = (df["execution_strength"] < 80) & (df["rsi"] > 60)
+
+        sell_signal = sell_rsi | (sell_bb & sell_macd) | sell_exec_weak
 
         df.loc[buy_signal, "signal"] = SignalType.BUY.value
         df.loc[sell_signal, "signal"] = SignalType.SELL.value
@@ -180,6 +207,14 @@ class ScalpingStrategy(BaseStrategy):
                 confidence += 0.1
             if latest["macd_hist"] > 0 and prev["macd_hist"] <= 0:
                 confidence += 0.1
+            # 체결강도 반영 (도서 p.88)
+            try:
+                if latest.get("execution_strength", 100) > 120:
+                    confidence += 0.1
+                if latest.get("volume_spike", 0) == 1:
+                    confidence += 0.05
+            except Exception:
+                pass
 
             # 동적 손절/익절 (ATR 기반)
             atr_val = int(latest["atr"]) if latest["atr"] > 0 else int(price * 0.01)
@@ -192,7 +227,8 @@ class ScalpingStrategy(BaseStrategy):
                 confidence=min(confidence, 1.0),
                 reason=(
                     f"매수: RSI={latest['rsi']:.1f}, BB%B={latest['bb_pctb']:.2f}, "
-                    f"VR={latest['vol_ratio']:.1f}"
+                    f"VR={latest['vol_ratio']:.1f}, "
+                    f"체결강도={latest.get('execution_strength', 0):.0f}"
                 ),
                 strategy_name=self.name,
             )

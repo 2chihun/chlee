@@ -103,6 +103,168 @@ class StrategyConfig:
     swing_hold_limit_minutes: int = 360
     # 감시 종목
     watchlist: list = field(default_factory=lambda: ["005930", "000660", "035720"])
+    # 도서 기반 추가 설정 (현명한 당신의 주식투자 교과서)
+    execution_strength_threshold: float = 100.0  # 체결강도 기준
+    volume_spike_threshold: float = 2.5          # 거래량 급증 배수
+    use_candle_patterns: bool = True             # 캔들 패턴 분석 사용
+    use_market_flow: bool = True                 # 수급 분석 사용
+
+
+@dataclass
+class CycleConfig:
+    """하워드 막스 마켓 사이클 설정"""
+    # 사이클 측정 기준 기간 (거래일, 기본 252일 = 약 1년)
+    cycle_lookback_days: int = 252
+    # 사이클 구간별 최대 포지션 비율
+    early_phase_max_pos: float = 0.8   # EARLY (0~30점): 공격적 매수
+    mid_phase_max_pos: float = 0.5     # MID (30~70점): 중립
+    late_phase_max_pos: float = 0.2    # LATE (70~100점): 방어적
+    # 사이클 필터 활성화 여부
+    use_cycle_filter: bool = True
+    # 확률분포 이동 기반 포지션 조정 활성화
+    use_probability_shift: bool = True
+    # 극단 회피 로직 활성화 (절대 never/always 방지)
+    use_extreme_avoidance: bool = True
+
+
+@dataclass
+class CreditCycleConfig:
+    """하워드 막스 신용/자본시장 사이클 설정
+
+    신용사이클은 가장 변동이 심하고 경제/시장에 가장 큰 영향을 미친다.
+    신용창구가 열리고 닫히는 상황에 따라 포지션을 조절한다.
+    """
+    # 신용환경 측정 기준 기간 (거래일, 기본 60일 = 약 3개월)
+    credit_lookback_days: int = 60
+    # 신용긴축 시 포지션 축소 비율 (기본 30% 축소)
+    tight_position_reduction: float = 0.3
+    # LATE 사이클 시 포지션 축소 비율 (기본 50% 축소)
+    late_cycle_reduction: float = 0.5
+    # 유동성 위기 감지 임계값 (평균 거래량 대비 배수)
+    liquidity_crisis_threshold: float = 2.5
+    # 신용사이클 필터 활성화 여부
+    use_credit_filter: bool = True
+    # 역투자 기회 감지 활성화 (극단 긴축 시 매수 기회)
+    use_contrarian_opportunity: bool = True
+
+
+@dataclass
+class CandleMasterConfig:
+    """캔들마스터 파동 매매법 설정
+
+    「캔들마스터의 주식 캔들 매매법」 핵심 개념 기반.
+    파동 위치 분석, 캔들군 분석, 자금 관리 설정을 포함합니다.
+    """
+    # 파동 분석
+    decline_threshold: float = 0.50      # 큰 하락 기준 (50%)
+    horizontal_width_pct: float = 0.30   # 수평 파동 폭 기준 (30%)
+    min_candle_count: int = 50           # 최소 캔들 수 (주간 기준 약 1년)
+    max_price_multiple: float = 10.0     # 최대 가격 배수
+    lookback_weeks: int = 252            # 분석 대상 기간 (주간 봉, 약 5년)
+
+    # 자금 관리
+    max_position_pct: float = 0.10       # 종목당 최대 비중 (10%)
+    small_account_pct: float = 0.20      # 소액 종목당 비중 (20%)
+    small_account_threshold: float = 10_000_000  # 소액 기준 (1000만원)
+
+    # 손절/목표
+    stop_loss_default: float = -0.10     # 기본 손절 (-10%)
+    stop_loss_max: float = -0.20         # 최대 손절 (-20%)
+    target_profit_default: float = 2.0   # 기본 목표 수익 (200%)
+    target_profit_min: float = 1.0       # 최소 목표 수익 (100%)
+
+    # 기능 활성화
+    use_wave_filter: bool = True         # 파동 분석 필터 사용
+    use_candle_groups: bool = True       # 캔들군 분석 사용
+
+    # 매수 구간 점수 기준
+    min_buy_zone_score: float = 50.0     # 최소 매수 구간 점수 (0~100)
+
+    # 물타기 방지
+    no_averaging_down: bool = True       # 물타기 방지 활성화
+
+
+@dataclass
+class WizardConfig:
+    """잭 슈웨거 마법사 교훈 설정
+
+    「주식시장의 마법사들」 64개 교훈 기반.
+    촉매 검증, 기회비용, 확신도 스케일링, 지표 시너지, 규율 추적.
+    """
+    # 촉매 필터 (교훈 19)
+    use_catalyst_filter: bool = True
+    catalyst_volume_threshold: float = 2.0   # 평균 거래량 대비 배수
+    # 기회비용 (교훈 22, 47)
+    use_opportunity_cost: bool = True
+    opportunity_cost_days: int = 20          # 기회비용 평가 기간 (거래일)
+    opportunity_cost_threshold: float = 0.03  # 3% 이상 기회비용 시 청산
+    # 확신도 스케일링 (교훈 37)
+    use_confidence_scaling: bool = True
+    confidence_max_scale: float = 2.0        # 최대 포지션 배수
+    confidence_min_scale: float = 0.3        # 최소 포지션 배수
+    # 지표 시너지 (교훈 54)
+    use_synergy_filter: bool = True
+    synergy_min_aligned: int = 3             # 최소 일치 지표 수
+    # 뉴스 반응 (교훈 21, 49)
+    use_news_reaction: bool = True
+    # 규율 추적 (교훈 7, 34)
+    use_discipline_tracking: bool = True
+    discipline_min_score: float = 50.0       # 최소 규율 점수
+
+
+@dataclass
+class KenFisherConfig:
+    """켄 피셔 "주식시장은 어떻게 반복되는가" 설정
+
+    시장 기억 분석, 변동성 정상화, 불신의 비관론(Wall of Worry),
+    약세장→강세장 전환 조기 감지 설정을 포함합니다.
+    """
+    # 변동성 공포 분석
+    volatility_lookback: int = 60         # 변동성 분석 기간 (거래일)
+    atr_fear_threshold: float = 2.0       # ATR 공포 배수 기준
+    # 불신의 비관론 감지
+    wow_lookback: int = 20                # Wall of Worry 분석 기간
+    # 약세장 회복 감지
+    bear_decline_threshold: float = 0.20  # 약세장 기준 하락률 (20%)
+    bear_recovery_threshold: float = 0.10 # 회복 신호 반등률 (10%)
+    bear_lookback_days: int = 252         # 약세장 분석 기간
+    # 포지션 조정 범위
+    max_position_multiplier: float = 1.3  # 최대 포지션 배수
+    min_position_multiplier: float = 0.7  # 최소 포지션 배수
+    # 기능 활성화
+    use_market_memory: bool = True        # 시장 기억 분석 사용
+    use_volatility_fear: bool = True      # 변동성 공포 분석 사용
+    use_wall_of_worry: bool = True        # 불신의 비관론 감지 사용
+    use_bear_recovery: bool = True        # 약세장 회복 감지 사용
+
+
+@dataclass
+class ValueInvestorConfig:
+    """강방천&존리 가치투자 설정
+
+    「나의 첫 주식 교과서」 핵심 개념 기반.
+    재무건전성 프록시, 저평가 판단, 역발상 매수, 장기보유 확신도.
+    """
+    # 재무건전성 프록시
+    fundamental_lookback: int = 120      # 분석 기간 (거래일)
+    # 저평가 판단
+    per_low_threshold: float = 10.0      # PER 저평가 기준
+    per_high_threshold: float = 25.0     # PER 고평가 기준
+    pbr_low_threshold: float = 0.8       # PBR 저평가 기준
+    roe_min_threshold: float = 10.0      # ROE 최소 기준 (%)
+    # 역발상 매수
+    contrarian_rsi_threshold: float = 30.0   # 역발상 RSI 임계값
+    consecutive_decline_days: int = 5        # 연속 하락 일수
+    # 장기보유
+    hold_min_days: int = 60              # 최소 보유 권장일
+    overvalued_rsi: float = 80.0         # 고평가 RSI 기준
+    # 포지션 조정 범위
+    max_position_multiplier: float = 1.5  # 최대 포지션 배수
+    min_position_multiplier: float = 0.5  # 최소 포지션 배수
+    # 기능 활성화
+    use_value_filter: bool = True        # 가치투자 필터 사용
+    use_contrarian: bool = True          # 역발상 매수 감지 사용
+    use_long_term_hold: bool = True      # 장기보유 확신도 사용
 
 
 @dataclass
@@ -123,6 +285,12 @@ class AppConfig:
     risk: RiskConfig = field(default_factory=RiskConfig)
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
     fundamental: FundamentalConfig = field(default_factory=FundamentalConfig)
+    cycle: CycleConfig = field(default_factory=CycleConfig)
+    credit_cycle: CreditCycleConfig = field(default_factory=CreditCycleConfig)
+    candle_master: CandleMasterConfig = field(default_factory=CandleMasterConfig)
+    wizard: WizardConfig = field(default_factory=WizardConfig)
+    ken_fisher: KenFisherConfig = field(default_factory=KenFisherConfig)
+    value_investor: ValueInvestorConfig = field(default_factory=ValueInvestorConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
     log_level: str = "INFO"
     api_host: str = "0.0.0.0"
@@ -173,12 +341,30 @@ def load_config() -> AppConfig:
 
     strategy = StrategyConfig(watchlist=watchlist)
 
+    # 신용사이클 설정 로드
+    credit_cycle = CreditCycleConfig(
+        credit_lookback_days=int(os.getenv("CREDIT_LOOKBACK_DAYS", "60")),
+        tight_position_reduction=float(
+            os.getenv("CREDIT_TIGHT_REDUCTION", "0.3")
+        ),
+        late_cycle_reduction=float(
+            os.getenv("LATE_CYCLE_REDUCTION", "0.5")
+        ),
+        use_credit_filter=os.getenv(
+            "USE_CREDIT_FILTER", "true"
+        ).lower() == "true",
+        use_contrarian_opportunity=os.getenv(
+            "USE_CONTRARIAN_OPPORTUNITY", "true"
+        ).lower() == "true",
+    )
+
     return AppConfig(
         kis=kis,
         db=db,
         risk=risk,
         strategy=strategy,
         fundamental=fundamental,
+        credit_cycle=credit_cycle,
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         api_host=os.getenv("API_HOST", "0.0.0.0"),
         api_port=int(os.getenv("API_PORT", "8000")),

@@ -16,16 +16,16 @@
     python tools/screen_capture_cl.py --list-windows      # 캡처 가능한 창 목록
     python tools/screen_capture_cl.py --title "제목"      # 특정 창 제목으로 캡처
 
-    # 📖 책 읽기 모드: 우측 > 버튼 랜덤 클릭 + 화면 변경 시 자동 캡처
+    # [BOOK] 책 읽기 모드: 우측 > 버튼 랜덤 클릭 + 화면 변경 시 자동 캡처
     #   - 되돌아감 자동 감지 + 중단 / 50페이지마다 10초 휴식
     #   - 전역 단축키: Ctrl+Alt+Shift+B(시작) / Ctrl+Alt+Shift+E(종료)
     python tools/screen_capture_cl.py --book --title "교과서" --monitor 2 --count 290
     python tools/screen_capture_cl.py --book --title "교과서" --monitor 2 --count 290 --rest-interval 50 --rest-seconds 10
 
-    # 🔍 캡처 폴더 중복 이미지 제거 (단독 실행)
+    # [FIND] 캡처 폴더 중복 이미지 제거 (단독 실행)
     python tools/screen_capture_cl.py --dedup --output captures
 
-    # 📋 캡처 결과 검증 (누락/이상치 확인)
+    # [LIST] 캡처 결과 검증 (누락/이상치 확인)
     python tools/screen_capture_cl.py --verify --output captures --title "교과서" --expected 290
 """
 
@@ -131,7 +131,7 @@ def find_window(title_keyword: str = "Edge"):
 
 def capture_window(win, sct) -> Image.Image:
     """특정 윈도우 영역을 캡처합니다 (멀티 모니터 지원)."""
-    # monitors[0]은 전체 가상 화면 — 음수 좌표도 포함
+    # monitors[0]은 전체 가상 화면 ? 음수 좌표도 포함
     virt = sct.monitors[0]
     left = max(win.left, virt["left"])
     top = max(win.top, virt["top"])
@@ -234,7 +234,7 @@ def verify_captures(folder: str, expected_count: int = 0, title_keyword: str = "
     """
     out = Path(folder)
     if not out.exists():
-        print(f"  ❌ 폴더가 존재하지 않습니다: {out.resolve()}")
+        print(f"  [ERR] 폴더가 존재하지 않습니다: {out.resolve()}")
         return
 
     # book_*.png 파일 수집 (키워드 필터 적용)
@@ -243,16 +243,16 @@ def verify_captures(folder: str, expected_count: int = 0, title_keyword: str = "
     files = sorted(out.glob(pattern))
 
     if not files:
-        print(f"  ❌ '{pattern}' 패턴에 해당하는 파일 없음: {out.resolve()}")
+        print(f"  [ERR] '{pattern}' 패턴에 해당하는 파일 없음: {out.resolve()}")
         return
 
-    print(f"\n  ========== 📋 캡처 검증 리포트 ==========")
+    print(f"\n  ========== [LIST] 캡처 검증 리포트 ==========")
     print(f"  폴더      : {out.resolve()}")
     print(f"  파일 패턴  : {pattern}")
     print(f"  캡처 파일  : {len(files)}장")
     if expected_count > 0:
         diff = expected_count - len(files)
-        status = "✅ 일치" if diff == 0 else f"⚠️  {abs(diff)}장 {'부족' if diff > 0 else '초과'}"
+        status = "[OK] 일치" if diff == 0 else f"[WARN]  {abs(diff)}장 {'부족' if diff > 0 else '초과'}"
         print(f"  예상 페이지 : {expected_count}장 → {status}")
 
     # 시퀀스 번호 추출 및 누락 감지
@@ -281,7 +281,7 @@ def verify_captures(folder: str, expected_count: int = 0, title_keyword: str = "
         actual_set = set(seq_numbers)
         missing = sorted(full_range - actual_set)
         if missing:
-            print(f"\n  🔍 누락된 시퀀스 번호 ({len(missing)}건):")
+            print(f"\n  [FIND] 누락된 시퀀스 번호 ({len(missing)}건):")
             # 연속 구간 묶어서 표시
             ranges = []
             start = missing[0]
@@ -300,7 +300,7 @@ def verify_captures(folder: str, expected_count: int = 0, title_keyword: str = "
                 else:
                     print(f"     #{s} ~ #{e} ({e - s + 1}장)")
         else:
-            print(f"\n  ✅ 시퀀스 번호 연속: #{seq_numbers[0]} ~ #{seq_numbers[-1]} (누락 없음)")
+            print(f"\n  [OK] 시퀀스 번호 연속: #{seq_numbers[0]} ~ #{seq_numbers[-1]} (누락 없음)")
 
     # 파일 크기 이상치 탐지
     sizes = [info[2] for info in file_info]
@@ -309,11 +309,11 @@ def verify_captures(folder: str, expected_count: int = 0, title_keyword: str = "
         min_threshold = avg_size * 0.15  # 평균의 15% 미만 → 의심
         anomalies = [(info[0], info[1], info[2]) for info in file_info if info[2] < min_threshold]
         if anomalies:
-            print(f"\n  ⚠️  파일 크기 이상치 ({len(anomalies)}건, 평균 {avg_size:.0f}KB 대비 15% 미만):")
+            print(f"\n  [WARN]  파일 크기 이상치 ({len(anomalies)}건, 평균 {avg_size:.0f}KB 대비 15% 미만):")
             for name, seq, size in anomalies:
                 print(f"     #{seq:4d}  {name}  ({size:.1f}KB) ← 빈 페이지/로딩 화면 의심")
         else:
-            print(f"\n  ✅ 파일 크기 정상 (평균 {avg_size:.0f}KB, 최소 {min(sizes):.0f}KB, 최대 {max(sizes):.0f}KB)")
+            print(f"\n  [OK] 파일 크기 정상 (평균 {avg_size:.0f}KB, 최소 {min(sizes):.0f}KB, 최대 {max(sizes):.0f}KB)")
 
     # 시간 간격 이상치 탐지
     timestamps = [(info[0], info[1], info[3]) for info in file_info if info[3] is not None]
@@ -325,7 +325,7 @@ def verify_captures(folder: str, expected_count: int = 0, title_keyword: str = "
 
         long_gaps = [(name, seq, gap) for name, seq, gap in time_gaps if gap > 30]
         if long_gaps:
-            print(f"\n  ⏱️  긴 시간 간격 ({len(long_gaps)}건, 30초 초과):")
+            print(f"\n  [TIME]  긴 시간 간격 ({len(long_gaps)}건, 30초 초과):")
             for name, seq, gap in long_gaps:
                 mins = int(gap // 60)
                 secs = int(gap % 60)
@@ -387,7 +387,7 @@ def _safe_capture(sct, win, monitor):
         return _do_capture(sct), sct
     except Exception:
         # mss 핸들이 무효화된 경우 재생성
-        print(f"  🔄 캡처 핸들 재생성 중...")
+        print(f"  ? 캡처 핸들 재생성 중...")
         try:
             sct.close()
         except Exception:
@@ -407,6 +407,7 @@ def run_book_capture(
     monitor: int = 0,
     rest_interval: int = 50,
     rest_seconds: float = 10.0,
+    start_count: int = 1,
 ):
     """책 읽기 모드: > 버튼 랜덤 클릭 + 화면 변경 감지 캡처
 
@@ -440,7 +441,7 @@ def run_book_capture(
         return
 
     capture_mode = f"모니터 {monitor} 전체" if monitor > 0 else "창 영역"
-    print(f"\n  ========== 📖 책 읽기 모드 (개선판) ==========")
+    print(f"\n  ========== [BOOK] 책 읽기 모드 (개선판) ==========")
     print(f"  대상 창   : {win.title[:60]}")
     print(f"  창 크기   : {win.width}x{win.height}")
     print(f"  > 클릭    : {click_min}~{click_max}초 랜덤 간격")
@@ -460,12 +461,12 @@ def run_book_capture(
     if _keyboard is not None:
         _keyboard.add_hotkey('ctrl+alt+shift+b', lambda: start_event.set())
         _keyboard.add_hotkey('ctrl+alt+shift+e', lambda: stop_event.set())
-        print("  ⌨️  전역 단축키 등록 완료")
+        print("  [KB]  전역 단축키 등록 완료")
         print("       시작: Ctrl+Alt+Shift+B")
         print("       종료: Ctrl+Alt+Shift+E")
     else:
         # keyboard 패키지 없으면 5초 카운트다운 후 자동 시작
-        print("  ⚠️  keyboard 패키지 없음 → 5초 후 자동 시작")
+        print("  [WARN]  keyboard 패키지 없음 → 5초 후 자동 시작")
         for i in range(5, 0, -1):
             print(f"    {i}...")
             time.sleep(1)
@@ -473,26 +474,26 @@ def run_book_capture(
 
     # 시작 단축키 대기
     if not start_event.is_set():
-        print("\n  ⏳ Ctrl+Alt+Shift+B 를 눌러 시작하세요...")
+        print("\n  ? Ctrl+Alt+Shift+B 를 눌러 시작하세요...")
         while not start_event.is_set():
             if stop_event.is_set():
-                print("  ⏹️  시작 전 종료됨")
+                print("  ??  시작 전 종료됨")
                 if _keyboard is not None:
                     _keyboard.remove_all_hotkeys()
                 return
             time.sleep(0.1)
-        print("  ▶️  시작!")
+        print("  [>]  시작!")
     print()
 
     # 창 활성화 (Windows API 사용)
     activated = activate_window(win)
     if activated:
-        print("  ✅ 창 활성화 성공")
+        print("  [OK] 창 활성화 성공")
     else:
-        print("  ⚠️  창 활성화 실패 - 수동으로 책 화면을 클릭해주세요.")
+        print("  [WARN]  창 활성화 실패 - 수동으로 책 화면을 클릭해주세요.")
         time.sleep(3)
 
-    # 콘텐츠 영역 계산 (음수 좌표 허용 — 좌측 모니터)
+    # 콘텐츠 영역 계산 (음수 좌표 허용 ? 좌측 모니터)
     win_left = win.left
     win_top = win.top
     cx = win_left + win.width // 2
@@ -501,19 +502,19 @@ def run_book_capture(
     # 초기 클릭으로 포커스 확보
     pyautogui.click(cx, cy)
     time.sleep(0.5)
-    print(f"  📌 콘텐츠 영역 클릭 ({cx}, {cy})")
+    print(f"  [PIN] 콘텐츠 영역 클릭 ({cx}, {cy})")
 
     # 페이지 넘기기: 우측 > 버튼 기준 좌표 (약 97%, 50%)
     btn_center_x = win_left + int(win.width * 0.97)
     btn_center_y = win_top + int(win.height * 0.50)
     # 랜덤 클릭 범위 (버튼 주변 ±15px)
     click_radius = 15
-    print(f"  📄 > 버튼 중심: ({btn_center_x}, {btn_center_y}), 반경 ±{click_radius}px\n")
+    print(f"  [PAGE] > 버튼 중심: ({btn_center_x}, {btn_center_y}), 반경 ±{click_radius}px\n")
 
     # 캡처 이력 해시 저장 (되돌아감 감지용)
     # hash_str → 최초 캡처된 페이지 번호 (해시 충돌 오탐 방지용)
     all_hashes = {}
-    count = 0
+    count = max(0, start_count - 1)   # --start-page 지원 (재시작 시 번호 이어받기)
     prev_hash = None
     skipped = 0
     MAX_SKIP = 30           # 연속 동일 화면 스킵 한도 (초과 시 마지막 페이지로 판단)
@@ -523,7 +524,7 @@ def run_book_capture(
     MAX_WINDOW_LOST = 15    # 연속 창 소실 한도
     last_rest_count = -1    # 마지막 휴식 시 count (중복 휴식 방지)
     # 되돌아감 감지 허용 거리: 이 값보다 먼 과거 페이지와 일치 시 되돌아감으로 판단
-    ROLLBACK_DISTANCE = 3
+    ROLLBACK_DISTANCE = 9999   # 사실상 비활성화 (오탐 방지)
     # safe_kw 미리 계산 (루프 내 반복 계산 방지)
     safe_kw = re.sub(r'[^\w]', '', title_keyword)[:10]
 
@@ -546,7 +547,7 @@ def run_book_capture(
 
             # 전역 단축키 중단 감지
             if stop_event.is_set():
-                print(f"\n  ⏹️  Ctrl+Alt+Shift+E 단축키로 중단됨")
+                print(f"\n  ??  Ctrl+Alt+Shift+E 단축키로 중단됨")
                 break
 
             # 휴식 삽입 (rest_interval 페이지마다, 중복 트리거 방지)
@@ -554,7 +555,7 @@ def run_book_capture(
                     and count % rest_interval == 0
                     and count != last_rest_count):
                 last_rest_count = count
-                print(f"  ☕ {count}페이지 도달 → {rest_seconds}초 휴식 중...")
+                print(f"  [REST] {count}페이지 도달 → {rest_seconds}초 휴식 중...")
                 time.sleep(rest_seconds)
 
             # 랜덤 대기 (click_min ~ click_max 초)
@@ -566,7 +567,7 @@ def run_book_capture(
             if win is None:
                 window_lost_count += 1
                 if window_lost_count >= MAX_WINDOW_LOST:
-                    print(f"\n  ❌ 창을 {MAX_WINDOW_LOST}회 연속 찾을 수 없어 중단합니다.")
+                    print(f"\n  [ERR] 창을 {MAX_WINDOW_LOST}회 연속 찾을 수 없어 중단합니다.")
                     break
                 print(f"  창을 찾을 수 없습니다. 대기 중... ({window_lost_count}/{MAX_WINDOW_LOST})")
                 time.sleep(2)
@@ -600,7 +601,7 @@ def run_book_capture(
                     if skipped % 5 == 0:
                         print(f"  ... 동일 화면 {skipped}회 스킵")
                     if skipped >= MAX_SKIP:
-                        print(f"\n  ⚠️  동일 화면 {MAX_SKIP}회 연속 → 마지막 페이지로 판단, 중단합니다.")
+                        print(f"\n  [WARN]  동일 화면 {MAX_SKIP}회 연속 → 마지막 페이지로 판단, 중단합니다.")
                         break
                     continue
 
@@ -610,12 +611,12 @@ def run_book_capture(
                 if curr_hash_str in all_hashes:
                     prev_seen_at = all_hashes[curr_hash_str]
                     if count - prev_seen_at > ROLLBACK_DISTANCE:
-                        print(f"\n  ⚠️  페이지 되돌아감 감지! (#{prev_seen_at + 1} 페이지와 일치)")
+                        print(f"\n  [WARN]  페이지 되돌아감 감지! (#{prev_seen_at + 1} 페이지와 일치)")
                         print(f"     {count}페이지까지 캡처 후 자동 중단합니다.")
                         break
                     else:
                         # 인접 페이지 해시 충돌 → 무시하고 계속 진행
-                        print(f"  ⚠️  해시 유사 (#{prev_seen_at + 1}↔#{count + 1}), 충돌 가능성 → 계속 진행")
+                        print(f"  [WARN]  해시 유사 (#{prev_seen_at + 1}↔#{count + 1}), 충돌 가능성 → 계속 진행")
 
                 # 변경됨 → 저장
                 prev_hash = curr_hash
@@ -634,9 +635,9 @@ def run_book_capture(
                 raise  # Ctrl+C는 상위로 전달
             except Exception as e:
                 consecutive_errors += 1
-                print(f"  ❗ 오류 ({consecutive_errors}/{MAX_ERRORS}): {e}")
+                print(f"  ? 오류 ({consecutive_errors}/{MAX_ERRORS}): {e}")
                 if consecutive_errors >= MAX_ERRORS:
-                    print(f"\n  ❌ 연속 오류 {MAX_ERRORS}회 도달, 중단합니다.")
+                    print(f"\n  [ERR] 연속 오류 {MAX_ERRORS}회 도달, 중단합니다.")
                     break
                 time.sleep(1)
                 continue
@@ -725,7 +726,7 @@ def run_capture(
             except KeyboardInterrupt:
                 raise
             except Exception as e:
-                print(f"  ❗ 캡처 오류: {e}")
+                print(f"  ? 캡처 오류: {e}")
 
             time.sleep(interval)
 
@@ -762,7 +763,7 @@ def main():
     parser.add_argument("--list-windows", "-l", action="store_true",
                         help="캡처 가능한 창 목록 표시")
 
-    # 📖 책 읽기 모드
+    # [BOOK] 책 읽기 모드
     parser.add_argument("--book", action="store_true",
                         help="책 읽기 모드: > 버튼 랜덤 클릭 + 화면 변경 감지 캡처")
     parser.add_argument('--click-min', type=float, default=2.0,
@@ -775,12 +776,14 @@ def main():
                         help="휴식 삽입 간격 - N페이지마다 (기본: 50, 0=비활성화)")
     parser.add_argument("--rest-seconds", type=float, default=10.0,
                         help="휴식 시간 (초, 기본: 10)")
+    parser.add_argument("--start-page", type=int, default=1,
+                        help="시작 페이지 번호 (재시작 시 이어받기, 기본: 1)")
 
-    # 🔍 중복 제거 단독 실행
+    # [FIND] 중복 제거 단독 실행
     parser.add_argument("--dedup", action="store_true",
                         help="저장 폴더의 중복 이미지만 제거 (단독 실행)")
 
-    # 📋 캡처 검증 단독 실행
+    # [LIST] 캡처 검증 단독 실행
     parser.add_argument("--verify", action="store_true",
                         help="캡처 결과 검증 (누락/이상치 확인, 단독 실행)")
     parser.add_argument("--expected", type=int, default=0,
@@ -813,6 +816,7 @@ def main():
             monitor=book_monitor,
             rest_interval=args.rest_interval,
             rest_seconds=args.rest_seconds,
+            start_count=args.start_page,
         )
         return
 
