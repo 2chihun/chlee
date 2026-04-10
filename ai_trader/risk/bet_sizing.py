@@ -206,3 +206,150 @@ def compute_bet_sizes(
     )
 
     return result
+
+
+class MultiStrategyKelly:
+    """다중 전략 켈리 최적 레버리지
+
+    F* = C⁻¹ × M
+    C = 전략 수익률 공분산 행렬 (N×N)
+    M = 평균 초과 수익률 벡터
+
+    포트폴리오 성장률: g = rf + F*'CF*/2
+    포트폴리오 샤프: S = sqrt(F*'CF*)
+
+    Chan 예시: OIH=1.29x, RKH=1.17x, RTH=-1.49x (공매도)
+    """
+
+    def __init__(
+        self,
+        rf_annual: float = 0.03,
+        max_leverage: float = 2.0,
+        use_half_kelly: bool = True,
+    ):
+        self.rf_annual = rf_annual
+        self.max_leverage = max_leverage
+        self.use_half_kelly = use_half_kelly
+
+    def compute(
+        self, returns_df: pd.DataFrame, lookback: int = 126
+    ) -> dict:
+        """다중 전략 켈리 레버리지 계산
+
+        Args:
+            returns_df: DataFrame (rows=날짜, cols=전략명)
+            lookback: 롤링 윈도우 (기본 6개월=126일)
+
+        Returns:
+            dict: leverages (dict), portfolio_sharpe, growth_rate,
+                  scaled_leverages (소매 레버리지 한도 적용)
+        """
+        recent = returns_df.tail(lookback).dropna()
+        n = len(recent)
+        if n < 20:
+            return {'leverages': {}, 'portfolio_sharpe': 0.0}
+
+        rf_daily = self.rf_annual / 252
+        excess = recent - rf_daily
+
+        # Annualized M and C
+        M = (excess.mean() * 252).values.reshape(-1, 1)
+        C = excess.cov().values * 252
+
+        try:
+            C_inv = np.linalg.inv(C)
+        except np.linalg.LinAlgError:
+            C_inv = np.linalg.pinv(C)
+
+        F_star_flat = C_inv @ M  # (N, 1)
+        f_star = F_star_flat.flatten()   # full Kelly array
+
+        half_f = f_star / 2  # always compute half-Kelly
+
+        # Apply half-Kelly if enabled
+        F = half_f if self.use_half_kelly else f_star.copy()
+
+        # Portfolio Sharpe and growth rate
+        portfolio_sharpe = float(np.sqrt(F @ C @ F))
+        growth_rate = float(self.rf_annual + F @ C @ F / 2)
+
+        # Scale to respect max leverage
+        total_abs = np.sum(np.abs(F))
+        if total_abs > self.max_leverage:
+            F = F * (self.max_leverage / total_abs)
+
+        strategy_names = list(returns_df.columns)
+        leverages = {
+            name: round(float(f), 4)
+            for name, f in zip(strategy_names, f_star)
+        }
+        scaled_leverages = {
+            name: round(float(f), 4)
+            for name, f in zip(strategy_names, F)
+        }
+
+        return {
+            'leverages': leverages,
+            'scaled_leverages': scaled_leverages,
+            'f_star': f_star,           # full Kelly array (N,)
+            'half_kelly': half_f,       # f_star / 2 array (N,)
+            'scaled_kelly': F,          # after leverage cap (N,)
+            'portfolio_sharpe': round(portfolio_sharpe, 4),
+            'growth_rate': round(growth_rate, 4),
+            'use_half_kelly': self.use_half_kelly,
+        }
+
+
+class RiskParityAllocator:
+    """리스크 패리티 배분기
+
+    Chan/Qian: 23% 주식 / 77% 채권 @ 1.8x 레버리지
+    전통 60/40 대비 리스크 조정 수익률 우수
+
+    핵심: 저베타 자산 + 레버리지 > 고베타 자산 무레버리지
+    컴파운드 성장률 ∝ 샤프 비율²
+    """
+
+    def __init__(self, target_vol: float = 0.10):
+        """
+        Args:
+            target_vol: 목표 연간 변동성 (기본 10%)
+        """
+        self.target_vol = target_vol
+
+    def allocate(self, returns_df: pd.DataFrame) -> dict:
+        """리스크 패리티 기반 자산 배분
+
+        각 자산의 변동성 역수에 비례하여 가중치 배분.
+        목표 변동성에 맞게 전체를 스케일링한다.
+
+        Args:
+            returns_df: DataFrame (rows=날짜, cols=자산명)
+
+        Returns:
+            dict: {자산명: 레버리지 가중치}
+        """
+        if returns_df.empty or len(returns_df) < 20:
+            n = len(returns_df.columns)
+            eq = 1.0 / n if n > 0 else 0.0
+            return {col: eq for col in returns_df.columns}
+
+        vol = returns_df.std() * np.sqrt(252)
+        vol = vol.replace(0, np.nan).dropna()
+
+        inv_vol = 1.0 / vol
+        weights = inv_vol / inv_vol.sum()
+
+        # Scale to target volatility
+        cov_matrix = returns_df[weights.index].cov().values * 252
+        w_vec = weights.values
+        portfolio_vol = float(np.sqrt(w_vec @ cov_matrix @ w_vec))
+        if portfolio_vol > 1e-6:
+            scale = self.target_vol / portfolio_vol
+        else:
+            scale = 1.0
+
+        return {
+            col: round(float(w), 4)
+            for col, w in weights.items()
+        }

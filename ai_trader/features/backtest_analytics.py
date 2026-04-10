@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from loguru import logger
+from scipy import stats as scipy_stats
 
 
 @dataclass
@@ -39,6 +40,8 @@ class BacktestAnalyticsSignal:
     position_multiplier: float
     # 신뢰도 조정 (-0.3~+0.3)
     confidence_adjustment: float
+    # 샤프 등급 (Chan 기준: A+/A/B/C/D)
+    sharpe_grade: str = ""
     # 설명
     note: str = ""
 
@@ -305,6 +308,7 @@ class BacktestAnalyzer:
                 overfit_score=0.0,
                 position_multiplier=1.0,
                 confidence_adjustment=0.0,
+                sharpe_grade="",
                 note="데이터 부족 (최소 60봉 필요)",
             )
 
@@ -356,8 +360,21 @@ class BacktestAnalyzer:
             conf_adj = half_kelly * 0.3 - overfit_score * 0.2 - cost_impact * 2
             conf_adj = float(np.clip(conf_adj, -0.3, 0.3))
 
+            # 7. 샤프 비율 검증 (Chan 기준)
+            sharpe_result = SharpeValidator.calculate(returns)
+            sharpe_grade = sharpe_result.get('grade', '')
+
+            # 8. 데이터 요구량 검증 (파라미터 수 가정 3개)
+            data_check = DataRequirementChecker.check(
+                n_data=len(returns), n_parameters=3
+            )
+            if data_check['overfitting_risk'] == 'HIGH':
+                notes_prefix = ["데이터요구량부족(과적합위험↑)"]
+            else:
+                notes_prefix = []
+
             # 설명
-            notes = []
+            notes = notes_prefix
             if half_kelly >= 0.2:
                 notes.append(f"켈리 우수(HK={half_kelly:.2f})")
             if overfit_score >= 0.5:
@@ -366,6 +383,10 @@ class BacktestAnalyzer:
                 notes.append(f"거래비용 과다(연{cost_impact:.1%})")
             if var95 < -0.03:
                 notes.append(f"VaR95 주의({var95:.1%})")
+            if sharpe_result.get('passes_minimum'):
+                notes.append(
+                    f"SR={sharpe_result['annualized_sharpe']:.2f}"
+                )
 
             return BacktestAnalyticsSignal(
                 kelly_fraction=round(full_kelly, 4),
@@ -377,6 +398,7 @@ class BacktestAnalyzer:
                 overfit_score=round(overfit_score, 4),
                 position_multiplier=round(multiplier, 2),
                 confidence_adjustment=round(conf_adj, 4),
+                sharpe_grade=sharpe_grade,
                 note=" | ".join(notes) if notes else "정상 범위",
             )
 
@@ -392,5 +414,161 @@ class BacktestAnalyzer:
                 overfit_score=0.0,
                 position_multiplier=1.0,
                 confidence_adjustment=0.0,
+                sharpe_grade="",
                 note=f"분석 오류: {e}",
             )
+
+
+class SharpeValidator:
+    """샤프 비율 검증기 (Chan 기준)
+
+    Chan 임계값:
+    - SR >= 1.0: 독립 전략으로 사용 가능
+    - SR > 2.0: 거의 매월 수익
+    - SR > 3.0: 거의 매일 수익
+
+    t-통계량: t = SR_daily * sqrt(n)
+    t >= 2.326 → p-value < 1% (99% 신뢰)
+    """
+
+    THRESHOLDS = {
+        'minimum': 1.0,
+        'monthly_profitable': 2.0,
+        'daily_profitable': 3.0,
+    }
+
+    @staticmethod
+    def calculate(
+        returns: pd.Series,
+        periods_per_year: int = 252,
+        rf_annual: float = 0.03,
+    ) -> dict:
+        """샤프 비율 및 통계적 유의성 계산
+
+        Args:
+            returns: 일별 수익률 시계열
+            periods_per_year: 연간 거래일수 (일봉=252, 시간봉=1638)
+            rf_annual: 연간 무위험수익률
+
+        Returns:
+            dict: sharpe, annualized_sharpe, t_stat, p_value,
+                  grade, cagr, max_drawdown, max_dd_duration
+        """
+        # 1. Excess returns (subtract RF daily)
+        rf_daily = rf_annual / periods_per_year
+        excess = returns - rf_daily
+
+        # 2. Sharpe ratio
+        mu = excess.mean()
+        sigma = excess.std()
+        if sigma < 1e-10:
+            return {
+                'sharpe': 0.0,
+                'annualized_sharpe': 0.0,
+                't_stat': 0.0,
+                'p_value': 1.0,
+                'grade': 'D',
+                'cagr': 0.0,
+                'max_drawdown': 0.0,
+                'max_dd_duration': 0,
+                'passes_minimum': False,
+                'n_periods': len(returns),
+            }
+
+        sr_period = mu / sigma
+        sr_annual = sr_period * np.sqrt(periods_per_year)
+
+        # 3. t-statistic: t = SR_daily * sqrt(n)
+        n = len(returns)
+        t_stat = sr_period * np.sqrt(n)
+        p_value = 2 * scipy_stats.t.sf(abs(t_stat), df=n - 1)
+
+        # 4. Grade
+        if sr_annual >= 3.0:
+            grade = 'A+'
+        elif sr_annual >= 2.0:
+            grade = 'A'
+        elif sr_annual >= 1.0:
+            grade = 'B'
+        elif sr_annual >= 0.5:
+            grade = 'C'
+        else:
+            grade = 'D'
+
+        # 5. CAGR
+        cum = (1 + returns).prod()
+        years = n / periods_per_year
+        cagr = cum ** (1 / years) - 1 if years > 0 else 0.0
+
+        # 6. Max drawdown + duration (high-watermark algorithm)
+        cum_ret = (1 + returns).cumprod()
+        hwm = cum_ret.cummax()
+        dd = cum_ret / hwm - 1
+        max_dd = dd.min()
+
+        # Duration: consecutive bars where DD > 0
+        in_dd = (dd < 0).astype(int)
+        dd_duration = 0
+        max_dd_dur = 0
+        for v in in_dd:
+            if v:
+                dd_duration += 1
+                max_dd_dur = max(max_dd_dur, dd_duration)
+            else:
+                dd_duration = 0
+
+        return {
+            'sharpe': round(float(sr_period), 4),
+            'annualized_sharpe': round(float(sr_annual), 4),
+            't_stat': round(float(t_stat), 4),
+            'p_value': round(float(p_value), 6),
+            'grade': grade,
+            'cagr': round(float(cagr), 4),
+            'max_drawdown': round(float(max_dd), 4),
+            'max_dd_duration': int(max_dd_dur),
+            'passes_minimum': bool(sr_annual >= 1.0),
+            'n_periods': n,
+        }
+
+
+class DataRequirementChecker:
+    """데이터 요구량 검증기 (Chan 규칙)
+
+    최대 5개 파라미터 권장
+    최소 데이터: 252 × num_parameters 거래일
+
+    예: 파라미터 3개 → 756 거래일 (약 3년) 필요
+    """
+
+    MAX_PARAMETERS = 5
+    DAYS_PER_PARAMETER = 252
+
+    @staticmethod
+    def check(n_data: int, n_parameters: int) -> dict:
+        """데이터 충분성 및 과적합 위험 검증
+
+        Args:
+            n_data: 보유 데이터 거래일 수
+            n_parameters: 전략 파라미터 수
+
+        Returns:
+            dict: n_data, n_parameters, required_data, sufficient,
+                  param_ok, overfitting_risk
+        """
+        required = (
+            DataRequirementChecker.DAYS_PER_PARAMETER * n_parameters
+        )
+        sufficient = n_data >= required
+        param_ok = n_parameters <= DataRequirementChecker.MAX_PARAMETERS
+        return {
+            'n_data': n_data,
+            'n_parameters': n_parameters,
+            'required_data': required,
+            'sufficient': sufficient,
+            'is_sufficient': sufficient,
+            'param_ok': param_ok,
+            'overfitting_risk': (
+                'HIGH' if not param_ok
+                else ('MEDIUM' if not sufficient else 'LOW')
+            ),
+        }
