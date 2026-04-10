@@ -225,20 +225,22 @@ class AITrader:
             result = self.executor.buy(stock_code, quantity, price)
             if result and result.success:
                 session = self.db.get_session()
-                trade = Trade(
-                    stock_code=stock_code,
-                    stock_name=stock_name,
-                    strategy=strategy_name,
-                    side="BUY",
-                    price=price,
-                    quantity=quantity,
-                    fee=int(price * quantity * 0.00015),
-                    tax=0,
-                    executed_at=datetime.now(),
-                )
-                session.add(trade)
-                session.commit()
-                session.close()
+                try:
+                    trade = Trade(
+                        stock_code=stock_code,
+                        stock_name=stock_name,
+                        strategy=strategy_name,
+                        side="BUY",
+                        price=price,
+                        quantity=quantity,
+                        fee=int(price * quantity * 0.00015),
+                        tax=0,
+                        executed_at=datetime.now(),
+                    )
+                    session.add(trade)
+                    session.commit()
+                finally:
+                    session.close()
                 logger.info(f"✅ 매수 체결 | {stock_name} {quantity}주 @ {price:,}")
 
         elif signal.type == SignalType.SELL:
@@ -266,7 +268,7 @@ class AITrader:
             result = self.executor.sell(stock_code, quantity, price)
             if result and result.success:
                 pnl = (price - buy_price) * quantity
-                pnl_pct = ((price / buy_price) - 1) * 100 if buy_price else 0
+                pnl_pct = ((price / buy_price) - 1) * 100 if buy_price and buy_price > 0 else 0
                 fee = int(price * quantity * 0.00015)
                 tax = int(price * quantity * 0.0018)
 
@@ -283,11 +285,12 @@ class AITrader:
                     tax=tax,
                     executed_at=datetime.now(),
                 )
-                session.add(trade)
-
-                position.is_active = False
-                session.commit()
-                session.close()
+                try:
+                    session.add(trade)
+                    position.is_active = False
+                    session.commit()
+                finally:
+                    session.close()
 
                 emoji = "🟢" if pnl > 0 else "🔴"
                 logger.info(

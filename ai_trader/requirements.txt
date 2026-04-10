@@ -19,6 +19,10 @@ sqlalchemy>=2.0.0
 scikit-learn>=1.3.0
 lightgbm>=4.1.0
 
+# 통계/과학 계산
+scipy>=1.12.0
+statsmodels>=0.14.0
+
 # 대시보드
 streamlit>=1.29.0
 fastapi>=0.104.0

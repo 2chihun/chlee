@@ -213,8 +213,9 @@ class WallOfWorryDetector:
         bb_recovery = (recent_bb.iloc[-1] > 0.3) and (recent_bb.min() < 0.1)
 
         # 가격 회복 + 거래량 부진 = 불신 랠리
-        price_change_5d = (close.iloc[-1] - close.iloc[-6]) / close.iloc[-6]
-        vol_change_5d = volume.tail(5).mean() / volume.tail(20).mean()
+        price_change_5d = (close.iloc[-1] - close.iloc[-6]) / close.iloc[-6] if close.iloc[-6] != 0 else 0.0
+        vol_avg_20 = volume.tail(20).mean()
+        vol_change_5d = volume.tail(5).mean() / vol_avg_20 if vol_avg_20 > 0 else 1.0
         distrust_rally = price_change_5d > 0.02 and vol_change_5d < 0.8
 
         # 극단 공포 후 반등 (RSI < 30에서 회복)

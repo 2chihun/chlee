@@ -267,7 +267,7 @@ class FallingKnifeDetector:
             if len(obv_cum) >= 2:
                 obv_slope = float(obv_cum[-1] - obv_cum[0])
                 # OBV가 크게 하락하지 않으면 펀더멘털 건전
-                obv_factor = 1.0 if obv_slope >= 0 else max(0.3, 1.0 + obv_slope / (abs(obv_slope) + 1e-10) * 0.7)
+                obv_factor = 1.0 if obv_slope >= 0 else max(0.3, 1.0 + (obv_slope / (abs(obv_slope) + 1e-10)) * 0.7)
             else:
                 obv_factor = 0.5
         else:

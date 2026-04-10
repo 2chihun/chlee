@@ -83,6 +83,97 @@ try:
 except ImportError:
     _HAS_DEEP_VALUE = False
 
+# 조상철 버블 감지 모듈 (없으면 무시)
+try:
+    from features.bubble_detector import BubbleDetector, BubbleSignal, BubblePhase
+    _HAS_BUBBLE_DETECTOR = True
+except ImportError:
+    _HAS_BUBBLE_DETECTOR = False
+
+# 백석현 환율 분석 모듈 (없으면 무시)
+try:
+    from features.exchange_rate import ExchangeRateAnalyzer, ExchangeRateSignal
+    _HAS_EXCHANGE_RATE = True
+except ImportError:
+    _HAS_EXCHANGE_RATE = False
+
+# 박병창 매매 집행 분석 보완 모듈 (없으면 무시)
+try:
+    from features.execution_analysis import ExecutionAnalyzer, ExecutionSignal
+    _HAS_EXECUTION_ANALYSIS = True
+except ImportError:
+    _HAS_EXECUTION_ANALYSIS = False
+
+# 홍용찬 퀀트밸류 분석 모듈 (없으면 무시)
+try:
+    from features.quant_value import QuantValueAnalyzer, QuantValueSignal
+    _HAS_QUANT_VALUE = True
+except ImportError:
+    _HAS_QUANT_VALUE = False
+
+# 영주 닐슨 월스트리트 퀀트 모듈 (없으면 무시)
+try:
+    from features.wall_street_quant import WallStreetQuantAnalyzer, WallStreetQuantSignal
+    _HAS_WALL_STREET_QUANT = True
+except ImportError:
+    _HAS_WALL_STREET_QUANT = False
+
+# 벤저민 그레이엄 현명한 투자자 모듈 (없으면 무시)
+try:
+    from features.graham_investor import GrahamInvestorAnalyzer, GrahamInvestorSignal
+    _HAS_GRAHAM_INVESTOR = True
+except ImportError:
+    _HAS_GRAHAM_INVESTOR = False
+
+# 에드워드 소프 시장 공략 모듈 (없으면 무시)
+try:
+    from features.beat_the_market import BeatTheMarketAnalyzer, BeatTheMarketSignal
+    _HAS_BEAT_THE_MARKET = True
+except ImportError:
+    _HAS_BEAT_THE_MARKET = False
+
+# AFML meta-labeling
+try:
+    from features.meta_labeling import AFMLAnalyzer, MetaLabelSignal
+    _HAS_AFML = True
+except ImportError:
+    _HAS_AFML = False
+
+# ML Alpha factors
+try:
+    from features.ml_alpha import MLAlphaAnalyzer, MLAlphaSignal
+    _HAS_ML_ALPHA = True
+except ImportError:
+    _HAS_ML_ALPHA = False
+
+# Korean quant factors
+try:
+    from features.kr_quant_factors import KRQuantAnalyzer, KRQuantSignal
+    _HAS_KR_QUANT = True
+except ImportError:
+    _HAS_KR_QUANT = False
+
+# Backtest analytics
+try:
+    from features.backtest_analytics import BacktestAnalyzer, BacktestAnalyticsSignal
+    _HAS_BACKTEST_ANALYTICS = True
+except ImportError:
+    _HAS_BACKTEST_ANALYTICS = False
+
+# Signal validation
+try:
+    from features.signal_validator import SignalValidator, SignalValidationSignal
+    _HAS_SIGNAL_VALIDATION = True
+except ImportError:
+    _HAS_SIGNAL_VALIDATION = False
+
+# 10개 도서 통합 모듈 (없으면 무시)
+try:
+    from features.book_integrator import BookIntegrator, IntegratedSignal
+    _HAS_BOOK_INTEGRATOR = True
+except ImportError:
+    _HAS_BOOK_INTEGRATOR = False
+
 
 class SwingStrategy(BaseStrategy):
     """일중 스윙 전략
@@ -191,6 +282,76 @@ class SwingStrategy(BaseStrategy):
             self._deep_value_analyzer = None
         self._last_deep_value: Optional["SeoJunsikSignal"] = None
 
+        # 조상철 버블 감지기 초기화
+        if _HAS_BUBBLE_DETECTOR:
+            self._bubble_detector = BubbleDetector()
+        else:
+            self._bubble_detector = None
+        self._last_bubble: Optional["BubbleSignal"] = None
+
+        # 백석현 환율 분석기 초기화
+        if _HAS_EXCHANGE_RATE:
+            self._exchange_rate_analyzer = ExchangeRateAnalyzer()
+        else:
+            self._exchange_rate_analyzer = None
+        self._last_exchange_rate: Optional["ExchangeRateSignal"] = None
+
+        # 박병창 매매 집행 분석 보완
+        if _HAS_EXECUTION_ANALYSIS:
+            self._execution_analyzer = ExecutionAnalyzer()
+        else:
+            self._execution_analyzer = None
+        self._last_execution: Optional["ExecutionSignal"] = None
+
+        # 홍용찬 퀀트밸류 분석기 초기화
+        if _HAS_QUANT_VALUE:
+            self._quant_value_analyzer = QuantValueAnalyzer(
+                lookback=merged.get("quant_value_lookback", 120),
+                dividend_lookback=merged.get("quant_dividend_lookback", 252),
+                momentum_period=merged.get("quant_momentum_period", 100),
+                evaluation_period=merged.get("quant_evaluation_period", 40),
+                deep_value_threshold=merged.get("quant_deep_value_threshold", 0.70),
+                max_position_multiplier=merged.get("quant_max_mult", 1.5),
+                min_position_multiplier=merged.get("quant_min_mult", 0.5),
+            )
+        else:
+            self._quant_value_analyzer = None
+        self._last_quant_value: Optional["QuantValueSignal"] = None
+
+        # 영주 닐슨 월스트리트 퀀트 분석기 초기화
+        if _HAS_WALL_STREET_QUANT:
+            self._wall_street_quant_analyzer = WallStreetQuantAnalyzer(
+                lookback=merged.get("wsq_lookback", 120),
+            )
+        else:
+            self._wall_street_quant_analyzer = None
+        self._last_wall_street_quant: Optional["WallStreetQuantSignal"] = None
+
+        # 벤저민 그레이엄 현명한 투자자 분석기 초기화
+        if _HAS_GRAHAM_INVESTOR:
+            self._graham_investor_analyzer = GrahamInvestorAnalyzer(
+                lookback=merged.get("graham_lookback", 240),
+            )
+        else:
+            self._graham_investor_analyzer = None
+        self._last_graham_investor: Optional["GrahamInvestorSignal"] = None
+
+        # 에드워드 소프 시장 공략 분석기 초기화
+        if _HAS_BEAT_THE_MARKET:
+            self._beat_the_market_analyzer = BeatTheMarketAnalyzer(
+                lookback=merged.get("btm_lookback", 240),
+            )
+        else:
+            self._beat_the_market_analyzer = None
+        self._last_beat_the_market: Optional["BeatTheMarketSignal"] = None
+
+        # 10개 도서 통합 분석기
+        if _HAS_BOOK_INTEGRATOR:
+            self._book_integrator = BookIntegrator()
+        else:
+            self._book_integrator = None
+        self._last_integrated: Optional["IntegratedSignal"] = None
+
     def analyze(self, df: pd.DataFrame) -> pd.DataFrame:
         """데이터에 스윙 전략 지표를 추가합니다."""
         result = df.copy()
@@ -232,13 +393,15 @@ class SwingStrategy(BaseStrategy):
         # 체결강도 (도서 p.88)
         try:
             result = add_execution_strength(result)
-        except Exception:
+        except Exception as e:
+            logger.debug("execution_strength calc failed: {}", e)
             result["execution_strength"] = 100.0
 
         # 거래량 급증 감지
         try:
             result = add_volume_spike(result)
-        except Exception:
+        except Exception as e:
+            logger.debug("volume_spike calc failed: {}", e)
             result["volume_spike"] = 0
 
         # 캔들 패턴 분석 (도서 Part 3: 봉 해석)
@@ -246,8 +409,8 @@ class SwingStrategy(BaseStrategy):
             if _HAS_CANDLE_PATTERNS:
                 result["bullish_engulfing"] = _cp.bullish_engulfing(result)
                 result["morning_star"] = _cp.morning_star(result)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
 
         # 갭 분석 (일봉 기준)
         if "prev_close" in result.columns:
@@ -264,8 +427,8 @@ class SwingStrategy(BaseStrategy):
                 result["cycle_phase"] = cycle_sig.phase
                 result["cycle_posture"] = cycle_sig.risk_posture
                 result["cycle_max_pos"] = cycle_sig.max_position_pct
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
 
         # 캔들마스터 파동 분석
         try:
@@ -275,16 +438,16 @@ class SwingStrategy(BaseStrategy):
                 result["wave_buy_score"] = wave_sig.buy_zone_score
                 result["wave_type"] = wave_sig.wave_type
                 result["wave_latter_half"] = int(wave_sig.is_latter_half)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
 
         # 캔들군 분석 (캔들마스터 방식)
         try:
             if _HAS_CANDLE_PATTERNS:
                 result = _cp.detect_candle_groups(result)
                 result = _cp.get_candle_group_signal(result)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
 
         # 켄 피셔 시장 기억 분석 (변동성 정상화, 불신의 비관론, 약세장 회복)
         try:
@@ -301,8 +464,8 @@ class SwingStrategy(BaseStrategy):
                     fisher_sig.extreme_distrust
                 )
                 result["fisher_exp_12m"] = fisher_sig.expected_12m_return
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
 
         # 강방천&존리 가치투자 분석 (재무건전성, 저평가, 역발상)
         try:
@@ -312,8 +475,8 @@ class SwingStrategy(BaseStrategy):
                 result["value_fundamental"] = value_sig.fundamental_score
                 result["value_valuation"] = value_sig.valuation_score
                 result["value_contrarian"] = value_sig.contrarian_score
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
 
         # 이남우 주식 품질 분석 (ROE 듀폰, 패닉매수, 자본집약도)
         try:
@@ -324,8 +487,8 @@ class SwingStrategy(BaseStrategy):
                 result["quality_roe"] = quality_sig.roe_quality
                 result["quality_panic"] = int(quality_sig.is_panic_buy)
                 result["quality_intensity"] = quality_sig.capital_intensity
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
 
         # 서준식 딥밸류 분석 (채권형주식, 기대수익률, 안전마진, 떨어지는칼날)
         try:
@@ -337,8 +500,142 @@ class SwingStrategy(BaseStrategy):
                 result["deep_value_safety_margin"] = dv_sig.safety_margin_score
                 result["deep_value_falling_knife"] = dv_sig.falling_knife_score
                 result["deep_value_buy_candidate"] = int(dv_sig.is_buy_candidate)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
+
+        # 조상철 버블 감지 분석
+        try:
+            if _HAS_BUBBLE_DETECTOR and self._bubble_detector is not None:
+                bubble_sig = self._bubble_detector.analyze(result)
+                self._last_bubble = bubble_sig
+                result["bubble_score"] = bubble_sig.bubble_score
+                result["bubble_phase"] = bubble_sig.phase.value
+                result["bubble_pos_mult"] = bubble_sig.position_multiplier
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
+
+        # 백석현 환율 분석
+        try:
+            if (_HAS_EXCHANGE_RATE
+                    and self._exchange_rate_analyzer is not None):
+                fx_sig = self._exchange_rate_analyzer.analyze(result)
+                self._last_exchange_rate = fx_sig
+                result["fx_dollar_strength"] = fx_sig.dollar_strength
+                result["fx_alarm"] = int(fx_sig.fx_alarm)
+                result["fx_pos_mult"] = fx_sig.position_multiplier
+                result["fx_risk_level"] = fx_sig.risk_level
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
+
+        # 박병창 매매 집행 분석 보완
+        try:
+            if (_HAS_EXECUTION_ANALYSIS
+                    and self._execution_analyzer is not None):
+                exec_sig = self._execution_analyzer.analyze(result)
+                self._last_execution = exec_sig
+                result["canslim_score"] = exec_sig.canslim_score
+                result["peg_ratio"] = exec_sig.peg_ratio
+                result["candle_force"] = exec_sig.candle_force
+                result["exec_conf_adj"] = exec_sig.confidence_adjustment
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
+
+        # 홍용찬 퀀트밸류 분석 (PER/PBR/PSR/PCR, ROE/ROA, 모멘텀, 캘린더)
+        try:
+            if (_HAS_QUANT_VALUE
+                    and self._quant_value_analyzer is not None):
+                qv_sig = self._quant_value_analyzer.analyze(result)
+                self._last_quant_value = qv_sig
+                result["qv_composite"] = qv_sig.composite_score
+                result["qv_value"] = qv_sig.value_score
+                result["qv_profit"] = qv_sig.profitability_score
+                result["qv_growth"] = qv_sig.growth_score
+                result["qv_safety"] = qv_sig.safety_score
+                result["qv_momentum"] = qv_sig.momentum_score
+                result["qv_calendar"] = qv_sig.calendar_adjustment
+                result["qv_deep_value"] = int(qv_sig.is_deep_value)
+                result["qv_pos_mult"] = qv_sig.position_multiplier
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
+
+        # 영주 닐슨 월스트리트 퀀트 분석 (5팩터, 행동편향, 리스크 분해)
+        try:
+            if (_HAS_WALL_STREET_QUANT
+                    and self._wall_street_quant_analyzer is not None):
+                wsq_sig = self._wall_street_quant_analyzer.analyze(result)
+                self._last_wall_street_quant = wsq_sig
+                result["wsq_composite"] = wsq_sig.composite_score
+                result["wsq_value"] = wsq_sig.value_factor
+                result["wsq_momentum"] = wsq_sig.momentum_factor
+                result["wsq_quality"] = wsq_sig.quality_factor
+                result["wsq_low_vol"] = wsq_sig.low_vol_factor
+                result["wsq_bias"] = wsq_sig.behavioral_bias_score
+                result["wsq_systematic"] = wsq_sig.systematic_risk_ratio
+                result["wsq_pos_mult"] = wsq_sig.position_multiplier
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
+
+        # 벤저민 그레이엄 현명한 투자자 분석 (안전마진, 방어적기준, 미스터마켓)
+        try:
+            if (_HAS_GRAHAM_INVESTOR
+                    and self._graham_investor_analyzer is not None):
+                grh_sig = self._graham_investor_analyzer.analyze(result)
+                self._last_graham_investor = grh_sig
+                result["graham_composite"] = grh_sig.composite_score
+                result["graham_mos"] = grh_sig.margin_of_safety
+                result["graham_defensive"] = grh_sig.defensive_score
+                result["graham_fear"] = grh_sig.mr_market_fear
+                result["graham_greed"] = grh_sig.mr_market_greed
+                result["graham_low_per"] = grh_sig.low_per_proxy
+                result["graham_pos_mult"] = grh_sig.position_multiplier
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
+
+        # 에드워드 소프 시장 공략 분석 (켈리, 이익수익률, 차익, 복리)
+        try:
+            if (_HAS_BEAT_THE_MARKET
+                    and self._beat_the_market_analyzer is not None):
+                btm_sig = self._beat_the_market_analyzer.analyze(result)
+                self._last_beat_the_market = btm_sig
+                result["btm_composite"] = btm_sig.composite_score
+                result["btm_kelly"] = btm_sig.kelly_fraction
+                result["btm_ey"] = btm_sig.earnings_yield_score
+                result["btm_stat_arb"] = btm_sig.stat_arb_opportunity
+                result["btm_compound"] = btm_sig.compound_quality
+                result["btm_pos_mult"] = btm_sig.position_multiplier
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
+
+        # 10개 도서 통합 분석
+        try:
+            if (_HAS_BOOK_INTEGRATOR
+                    and self._book_integrator is not None):
+                module_signals = {}
+                if self._last_cycle is not None:
+                    module_signals["market_cycle"] = self._last_cycle
+                if self._last_bubble is not None:
+                    module_signals["bubble_detector"] = self._last_bubble
+                if self._last_exchange_rate is not None:
+                    module_signals["exchange_rate"] = self._last_exchange_rate
+                if self._last_fisher is not None:
+                    module_signals["market_memory"] = self._last_fisher
+                if self._last_value is not None:
+                    module_signals["value_investor"] = self._last_value
+                if self._last_quality is not None:
+                    module_signals["stock_quality"] = self._last_quality
+                if self._last_deep_value is not None:
+                    module_signals["deep_value"] = self._last_deep_value
+                if self._last_execution is not None:
+                    module_signals["execution_analysis"] = self._last_execution
+                integrated = self._book_integrator.integrate(
+                    result, module_signals
+                )
+                self._last_integrated = integrated
+                result["integrated_score"] = integrated.composite_score
+                result["integrated_action"] = integrated.action
+                result["integrated_pos_mult"] = integrated.position_multiplier
+        except Exception as e:
+            logger.debug("Feature calc skipped: {}", e)
 
         # 시그널 계산
         result["signal"] = SignalType.HOLD.value
@@ -491,8 +788,8 @@ class SwingStrategy(BaseStrategy):
                         # 전환점 감지: 신뢰도 +15%
                         confidence += 0.15
                         reasons.append("사이클전환점")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Signal calc skipped: {}", e)
 
             if cycle_block:
                 return Signal(
@@ -525,8 +822,8 @@ class SwingStrategy(BaseStrategy):
                 if latest.get("morning_star", False):
                     confidence += 0.15
                     reasons.append("샛별형")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Signal calc skipped: {}", e)
 
             # 주도주 추종: 거래량 급증 + EMA 정배열 (도서 Part 3)
             try:
@@ -534,8 +831,8 @@ class SwingStrategy(BaseStrategy):
                         and latest.get("ema_aligned", False)):
                     confidence += 0.1
                     reasons.append("주도주후보")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Signal calc skipped: {}", e)
 
             # --------------------------------------------------------
             # 캔들마스터 파동 위치 분석 필터
@@ -563,8 +860,8 @@ class SwingStrategy(BaseStrategy):
                     if ws.buy_zone_score >= 70 and not wave_block:
                         confidence += 0.1
                         reasons.append(f"파동매수구간({ws.wave_type})")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Signal calc skipped: {}", e)
 
             if wave_block:
                 return Signal(
@@ -582,8 +879,8 @@ class SwingStrategy(BaseStrategy):
                 elif candle_group_sig < 0:
                     confidence -= 0.1
                     reasons.append("캔들군매도압력")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Signal calc skipped: {}", e)
 
             # --------------------------------------------------------
             # 켄 피셔 시장 기억 필터
@@ -619,8 +916,8 @@ class SwingStrategy(BaseStrategy):
                         reasons.append(
                             f"V자회복대칭({fs.v_shape_score:.2f})"
                         )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Signal calc skipped: {}", e)
 
             # --------------------------------------------------------
             # 강방천&존리 가치투자 필터
@@ -646,8 +943,8 @@ class SwingStrategy(BaseStrategy):
                             "[가치투자필터] 고평가 경고(val={:.2f}) → 매수 보류",
                             vs.valuation_score
                         )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Signal calc skipped: {}", e)
 
             if value_block:
                 return Signal(
@@ -683,8 +980,8 @@ class SwingStrategy(BaseStrategy):
                         reasons.append(
                             f"자본집약({qs.capital_intensity:.2f})"
                         )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Signal calc skipped: {}", e)
 
             if quality_block:
                 return Signal(
@@ -720,8 +1017,8 @@ class SwingStrategy(BaseStrategy):
                             "[딥밸류필터] 고평가(bond=%.2f,margin=%.2f) → 매수 보류",
                             dv.bond_type_score, dv.safety_margin_score
                         )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Signal calc skipped: {}", e)
 
             if deep_value_block:
                 return Signal(
@@ -796,8 +1093,127 @@ class SwingStrategy(BaseStrategy):
                             reason="기대갭 감지 (슈웨거 교훈21)",
                             strategy_name=self.name,
                         )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Signal calc skipped: {}", e)
+
+            # --------------------------------------------------------
+            # 조상철 버블 감지 필터
+            # BURST/PANIC → 매수 차단, PEAK → 경고
+            # --------------------------------------------------------
+            try:
+                if (_HAS_BUBBLE_DETECTOR
+                        and self._last_bubble is not None):
+                    bs = self._last_bubble
+                    if bs.phase in (BubblePhase.BURST,
+                                    BubblePhase.PANIC):
+                        logger.info(
+                            f"[버블필터] {bs.phase.value} "
+                            f"(점수={bs.bubble_score:.0f}) "
+                            f"→ 매수 차단!"
+                        )
+                        return Signal(
+                            type=SignalType.HOLD,
+                            stock_code=stock_code,
+                            price=price,
+                            reason=(
+                                f"버블 {bs.phase.value} "
+                                f"(조상철: {bs.warning_message})"
+                            ),
+                            strategy_name=self.name,
+                        )
+                    elif bs.phase == BubblePhase.PEAK:
+                        confidence -= 0.15
+                        reasons.append(
+                            f"버블PEAK({bs.bubble_score:.0f})"
+                        )
+                    elif bs.phase == BubblePhase.EUPHORIA:
+                        confidence -= 0.05
+                        reasons.append("과열주의")
+            except Exception as e:
+                logger.debug("Signal calc skipped: {}", e)
+
+            # --------------------------------------------------------
+            # 백석현 환율 분석 필터
+            # 환율 급변 경보 → 포지션 축소
+            # 달러 강세 → 신뢰도 하향
+            # --------------------------------------------------------
+            try:
+                if (_HAS_EXCHANGE_RATE
+                        and self._last_exchange_rate is not None):
+                    fx = self._last_exchange_rate
+                    if fx.fx_alarm:
+                        confidence -= 0.10
+                        reasons.append("환율급변경보")
+                    if fx.kospi_impact < -0.2:
+                        confidence -= 0.05
+                        reasons.append(
+                            f"달러강세({fx.dollar_strength:.0f})"
+                        )
+                    elif fx.kospi_impact > 0.2:
+                        confidence += 0.05
+                        reasons.append(
+                            f"달러약세({fx.dollar_strength:.0f})"
+                        )
+                    # 심리 편향 보정
+                    if self._exchange_rate_analyzer is not None:
+                        confidence = (
+                            self._exchange_rate_analyzer
+                            .correct_confidence(analyzed, confidence)
+                        )
+            except Exception as e:
+                logger.debug("Signal calc skipped: {}", e)
+
+            # --------------------------------------------------------
+            # 박병창 매매 집행 분석 보완
+            # CANSLIM, PEG, 장대봉 50% 기준선
+            # --------------------------------------------------------
+            try:
+                if (_HAS_EXECUTION_ANALYSIS
+                        and self._last_execution is not None):
+                    ex = self._last_execution
+                    confidence += ex.confidence_adjustment
+                    if ex.canslim_score >= 70:
+                        reasons.append(
+                            f"CANSLIM={ex.canslim_score:.0f}"
+                        )
+                    if ex.peg_ratio < 1.0:
+                        reasons.append(
+                            f"PEG={ex.peg_ratio:.2f}"
+                        )
+                    if (ex.candle_force > 0.5
+                            and not ex.candle_force_intact):
+                        confidence -= 0.10
+                        reasons.append("장대봉붕괴")
+            except Exception as e:
+                logger.debug("Signal calc skipped: {}", e)
+
+            # --------------------------------------------------------
+            # 9개 도서 통합 분석 최종 조정
+            # BLOCK → 매수 차단, 통합 점수 반영
+            # --------------------------------------------------------
+            try:
+                if (_HAS_BOOK_INTEGRATOR
+                        and self._last_integrated is not None):
+                    itg = self._last_integrated
+                    if itg.action == "BLOCK":
+                        return Signal(
+                            type=SignalType.HOLD,
+                            stock_code=stock_code,
+                            price=price,
+                            reason=f"통합분석 BLOCK: {itg.reason}",
+                            strategy_name=self.name,
+                        )
+                    # 통합 점수로 최종 confidence 조정
+                    if itg.composite_score >= 70:
+                        confidence += 0.10
+                    elif itg.composite_score <= 30:
+                        confidence -= 0.10
+                    reasons.append(
+                        f"통합={itg.composite_score:.0f}"
+                        f"({itg.action})"
+                    )
+            except Exception as e:
+                logger.debug("Signal calc skipped: {}", e)
 
             atr_val = int(latest["atr"]) if latest["atr"] > 0 else int(price * 0.015)
             stop_loss = price - int(atr_val * 2)

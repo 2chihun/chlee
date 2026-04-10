@@ -12,9 +12,111 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+from scipy import stats as scipy_stats
 from loguru import logger
 
 from strategies.base import BaseStrategy, SignalType
+
+
+# ── ML 성과 통계 함수 (López de Prado Ch14) ──────────────────────
+
+def probabilistic_sharpe_ratio(
+    sr_obs: float,
+    sr_bench: float,
+    n_obs: int,
+    skew: float,
+    kurt: float,
+) -> float:
+    """Probabilistic Sharpe Ratio (PSR).
+
+    관측된 SR이 벤치마크 SR을 초과할 확률을 반환합니다.
+
+    Args:
+        sr_obs: 관측된 연환산 Sharpe Ratio
+        sr_bench: 벤치마크 SR (기본 0)
+        n_obs: 관측 수 (거래일 수)
+        skew: 수익률 왜도
+        kurt: 수익률 첨도
+
+    Returns:
+        PSR ∈ [0, 1]
+    """
+    if n_obs < 5 or sr_obs == 0:
+        return float("nan")
+    try:
+        # 일간 SR로 변환 (입력이 연환산이면)
+        sr_daily = sr_obs / np.sqrt(252)
+        sr_bench_daily = sr_bench / np.sqrt(252)
+        # 분모: 표준오차 추정
+        denom = np.sqrt(
+            (1 - skew * sr_daily + (kurt - 1) / 4 * sr_daily ** 2)
+            / (n_obs - 1)
+        )
+        if denom <= 0:
+            return float("nan")
+        z = (sr_daily - sr_bench_daily) / denom
+        return float(scipy_stats.norm.cdf(z))
+    except Exception:
+        return float("nan")
+
+
+def deflated_sharpe_ratio(
+    sr_obs: float,
+    sr_list: list[float],
+    n_obs: int,
+    skew: float,
+    kurt: float,
+) -> float:
+    """Deflated Sharpe Ratio (DSR).
+
+    다수 시행(multiple testing)에서 기대되는 SR 최대값을 벤치마크로
+    사용해 보정된 PSR을 반환합니다.
+
+    Args:
+        sr_obs: 관측된 연환산 SR
+        sr_list: 이전 시행들의 SR 리스트
+        n_obs: 관측 수
+        skew: 수익률 왜도
+        kurt: 수익률 첨도
+
+    Returns:
+        DSR ∈ [0, 1]
+    """
+    T = max(len(sr_list), 1)
+    if T <= 1:
+        return probabilistic_sharpe_ratio(sr_obs, 0.0, n_obs, skew, kurt)
+    try:
+        gamma = 0.5772156649  # Euler-Mascheroni 상수
+        # 기대 최대 SR 추정 (연환산 기준)
+        sr_bench = np.sqrt(np.var(sr_list, ddof=1)) * (
+            (1 - gamma) * scipy_stats.norm.ppf(1 - 1.0 / T)
+            + gamma * scipy_stats.norm.ppf(1 - 1.0 / (T * np.e))
+        )
+        return probabilistic_sharpe_ratio(sr_obs, sr_bench, n_obs, skew, kurt)
+    except Exception:
+        return float("nan")
+
+
+def hhi_concentration(returns: pd.Series) -> float:
+    """HHI 수익 집중도 (Herfindahl-Hirschman Index).
+
+    수익이 소수 거래에 집중될수록 1에 가까워집니다 (나쁜 신호).
+    균등 분산 시 0에 가까워집니다 (좋은 신호).
+
+    Returns:
+        HHI_normalized ∈ [-1, 1] (음수: 수익 분산, 양수: 수익 집중)
+    """
+    pos = returns[returns > 0]
+    if len(pos) < 2:
+        return float("nan")
+    try:
+        w = pos / pos.sum()
+        hhi = float((w ** 2).sum())
+        n = len(pos)
+        hhi_norm = (hhi - 1.0 / n) / (1.0 - 1.0 / n)
+        return hhi_norm
+    except Exception:
+        return float("nan")
 
 
 # ── 비용 모델 ───────────────────────────────────────────────────
@@ -28,17 +130,17 @@ class CostModel:
     min_commission: int = 0            # 최소 수수료
 
     def buy_cost(self, price: int, quantity: int) -> int:
+        """매수 부대비용 (수수료만, 슬리피지는 effective_buy_price에 반영)"""
         amount = price * quantity
         commission = max(int(amount * self.commission_rate), self.min_commission)
-        slippage = int(amount * self.slippage_pct / 100)
-        return commission + slippage
+        return commission
 
     def sell_cost(self, price: int, quantity: int) -> int:
+        """매도 부대비용 (수수료+세금, 슬리피지는 effective_sell_price에 반영)"""
         amount = price * quantity
         commission = max(int(amount * self.commission_rate), self.min_commission)
         tax = int(amount * self.tax_rate)
-        slippage = int(amount * self.slippage_pct / 100)
-        return commission + tax + slippage
+        return commission + tax
 
     def effective_buy_price(self, price: int) -> int:
         return int(price * (1 + self.slippage_pct / 100))
@@ -76,6 +178,11 @@ class BacktestMetrics:
     end_date: str = ""
     strategy_name: str = ""
     params: dict = field(default_factory=dict)
+    # ── ML 성과 통계 (López de Prado) ──
+    psr: float = float("nan")        # Probabilistic Sharpe Ratio
+    dsr: float = float("nan")        # Deflated Sharpe Ratio
+    hhi: float = float("nan")        # Returns Concentration (HHI)
+    time_under_water: int = 0        # 최대 수중 시간 (bars)
 
     def to_dict(self) -> dict:
         return {k: v for k, v in self.__dict__.items()}
@@ -198,6 +305,8 @@ class BacktestEngine:
                     pnl_pct_actual = pnl / position["amount"] * 100
 
                     capital += sell_amount - sell_cost
+                    sell_commission = max(int(price * position["quantity"] * self.cost_model.commission_rate), self.cost_model.min_commission)
+                    sell_tax = int(price * position["quantity"] * self.cost_model.tax_rate)
                     trades.append(TradeRecord(
                         entry_date=position["entry_date"],
                         exit_date=current_time,
@@ -208,8 +317,8 @@ class BacktestEngine:
                         quantity=position["quantity"],
                         pnl=pnl,
                         pnl_pct=pnl_pct_actual,
-                        fee=position["fee"] + int(sell_amount * self.cost_model.commission_rate),
-                        tax=int(sell_amount * self.cost_model.tax_rate),
+                        fee=position["fee"] + sell_commission,
+                        tax=sell_tax,
                         holding_bars=position["holding_bars"],
                         reason=reason,
                     ))
@@ -244,6 +353,8 @@ class BacktestEngine:
             sell_cost = self.cost_model.sell_cost(last_price, position["quantity"])
             pnl = sell_amount - position["amount"] - position["fee"] - sell_cost
             capital += sell_amount - sell_cost
+            close_commission = max(int(last_price * position["quantity"] * self.cost_model.commission_rate), self.cost_model.min_commission)
+            close_tax = int(last_price * position["quantity"] * self.cost_model.tax_rate)
             trades.append(TradeRecord(
                 entry_date=position["entry_date"],
                 exit_date=str(analyzed.iloc[-1][time_col]),
@@ -254,8 +365,8 @@ class BacktestEngine:
                 quantity=position["quantity"],
                 pnl=pnl,
                 pnl_pct=pnl / position["amount"] * 100,
-                fee=position["fee"] + int(sell_amount * self.cost_model.commission_rate),
-                tax=int(sell_amount * self.cost_model.tax_rate),
+                fee=position["fee"] + close_commission,
+                tax=close_tax,
                 holding_bars=position["holding_bars"],
                 reason="강제청산",
             ))
@@ -339,6 +450,32 @@ class BacktestEngine:
             # 연속 승/패
             m.max_consecutive_wins = self._max_consecutive(trades, win=True)
             m.max_consecutive_losses = self._max_consecutive(trades, win=False)
+
+        # ── ML 성과 통계 (López de Prado Ch14) ──
+        if len(equities) > 5:
+            eq_series = pd.Series(equities)
+            returns = eq_series.pct_change().dropna()
+            if len(returns) > 5 and m.sharpe_ratio != 0:
+                skew_val = float(returns.skew())
+                kurt_val = float(returns.kurtosis()) + 3  # excess → raw kurtosis
+                m.psr = probabilistic_sharpe_ratio(
+                    m.sharpe_ratio, 0.0, len(returns), skew_val, kurt_val
+                )
+                m.dsr = m.psr  # 단일 백테스트 → PSR과 동일
+                m.hhi = hhi_concentration(returns)
+
+            # Time Under Water: 최고점 회복까지 최대 기간
+            peak = equities[0]
+            uw_count = 0
+            max_uw = 0
+            for eq in equities:
+                if eq >= peak:
+                    peak = eq
+                    uw_count = 0
+                else:
+                    uw_count += 1
+                    max_uw = max(max_uw, uw_count)
+            m.time_under_water = max_uw
 
         return m
 

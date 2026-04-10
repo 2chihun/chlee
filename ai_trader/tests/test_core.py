@@ -1,484 +1,2304 @@
-"""AI Trader 핵심 모듈 테스트
+# -*- coding: utf-8 -*-
 
-API 키 없이 실행 가능한 단위 테스트
+"""AI Trader ???? ? ????????
+
+
+
+API ?? ???? ???? ?????? ???? ????????
+
 """
 
+
+
 import os
+
 import sys
+
 import unittest
+
 from datetime import datetime, timedelta
+
 from unittest.mock import MagicMock, patch
 
+
+
 import numpy as np
+
 import pandas as pd
 
-# 프로젝트 루트 경로 추가
+
+
+# ????? ??? ? ????
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-# ── 샘플 데이터 생성 헬퍼 ────────────────────────────────────
+
+
+
+# ?????? ???? ?????? ???? ???? ????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+
+
 
 
 def make_ohlcv(n: int = 200, base_price: float = 50000) -> pd.DataFrame:
-    """테스트용 OHLCV 데이터 생성"""
+
+    """?????????? OHLCV ?????? ????"""
+
     np.random.seed(42)
+
     dates = pd.date_range("2024-01-02 09:00", periods=n, freq="5min")
+
     close = base_price + np.cumsum(np.random.randn(n) * 100)
-    close = np.maximum(close, 1000)  # 음수 방지
+
+    close = np.maximum(close, 1000)  # ???? ??
+
+
 
     df = pd.DataFrame({
+
         "datetime": dates,
+
         "open": close + np.random.randn(n) * 50,
+
         "high": close + abs(np.random.randn(n) * 100),
+
         "low": close - abs(np.random.randn(n) * 100),
+
         "close": close,
+
         "volume": np.random.randint(1000, 100000, n),
+
     })
+
     df["open"] = df["open"].clip(lower=100)
+
     df["high"] = df[["open", "close", "high"]].max(axis=1)
+
     df["low"] = df[["open", "close", "low"]].min(axis=1)
+
     return df
 
 
-# ══════════════════════════════════════════════════════════════
-# 1. 기술적 지표 테스트
-# ══════════════════════════════════════════════════════════════
+
+
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+# 1. ??? ???? ????????
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+
+
 
 
 class TestIndicators(unittest.TestCase):
-    """features/indicators.py 테스트"""
+
+    """features/indicators.py ????????"""
+
+
 
     def setUp(self):
+
         self.df = make_ohlcv(200)
 
+
+
     def test_add_all_indicators(self):
+
         from features.indicators import add_all_indicators
+
         result = add_all_indicators(self.df.copy())
 
+
+
         expected_cols = ["rsi_14", "macd", "macd_signal", "bb_upper",
+
                          "bb_lower", "bb_mid", "ema_5", "ema_20"]
+
         for col in expected_cols:
+
             self.assertIn(col, result.columns, f"Missing column: {col}")
 
+
+
         self.assertEqual(len(result), len(self.df))
+
+
 
     def test_rsi_range(self):
+
         from features.indicators import rsi
+
         result = rsi(self.df["close"])
+
         valid = result.dropna()
+
         self.assertTrue((valid >= 0).all(), "RSI < 0")
+
         self.assertTrue((valid <= 100).all(), "RSI > 100")
 
+
+
     def test_bollinger_bands(self):
+
         from features.indicators import bollinger_bands
+
         upper, mid, lower, bw, pctb = bollinger_bands(self.df["close"])
+
         mask = upper.notna() & mid.notna() & lower.notna()
 
+
+
         self.assertTrue((upper[mask] >= mid[mask]).all(),
+
                         "Upper band < Mid band")
+
         self.assertTrue((mid[mask] >= lower[mask]).all(),
+
                         "Mid band < Lower band")
 
+
+
     def test_macd(self):
+
         from features.indicators import macd
+
         line, sig, hist = macd(self.df["close"])
+
         self.assertEqual(len(line), len(self.df))
+
         valid_hist = hist.dropna()
-        # MACD histogram ≈ line - signal
+
+        # MACD histogram ?? line - signal
+
         expected = (line - sig).dropna()
+
         pd.testing.assert_series_equal(
+
             valid_hist, expected.loc[valid_hist.index],
+
             check_names=False, atol=1e-6
+
         )
 
+
+
     def test_vwap(self):
+
         from features.indicators import vwap
+
         result = vwap(self.df)
+
         self.assertEqual(len(result), len(self.df))
+
         valid = result.dropna()
+
         self.assertTrue((valid > 0).all(), "VWAP should be positive")
 
+
+
     def test_atr(self):
+
         from features.indicators import atr
+
         result = atr(self.df)
+
         valid = result.dropna()
+
         self.assertTrue((valid >= 0).all(), "ATR should be non-negative")
 
 
-# ══════════════════════════════════════════════════════════════
-# 2. 전략 테스트
-# ══════════════════════════════════════════════════════════════
+
+
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+# 2. ???? ????????
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+
+
 
 
 class TestStrategies(unittest.TestCase):
-    """strategies/ 테스트"""
+
+    """strategies/ ????????"""
+
+
 
     def setUp(self):
+
         from features.indicators import add_all_indicators
+
         self.df = add_all_indicators(make_ohlcv(200))
 
+
+
     def test_scalping_signal_type(self):
+
         from strategies.scalping import ScalpingStrategy
+
         from strategies.base import SignalType
 
+
+
         strategy = ScalpingStrategy()
+
         signal = strategy.generate_signal(self.df)
 
+
+
         if signal is not None:
+
             self.assertIn(signal.type,
+
                           [SignalType.BUY, SignalType.SELL, SignalType.HOLD])
+
             self.assertGreaterEqual(signal.confidence, 0)
+
             self.assertLessEqual(signal.confidence, 1)
 
+
+
     def test_swing_signal_type(self):
+
         from strategies.swing import SwingStrategy
+
         from strategies.base import SignalType
+
+
 
         strategy = SwingStrategy()
+
         signal = strategy.generate_signal(self.df)
+
+
 
         if signal is not None:
+
             self.assertIn(signal.type,
+
                           [SignalType.BUY, SignalType.SELL, SignalType.HOLD])
 
+
+
     def test_signal_has_stop_loss(self):
+
         from strategies.scalping import ScalpingStrategy
+
         from strategies.base import SignalType
 
+
+
         strategy = ScalpingStrategy()
+
         signal = strategy.generate_signal(self.df)
 
+
+
         if signal and signal.type == SignalType.BUY:
+
             self.assertIsNotNone(signal.stop_loss,
+
                                  "BUY signal should have stop_loss")
+
             self.assertIsNotNone(signal.take_profit,
+
                                  "BUY signal should have take_profit")
 
 
-# ══════════════════════════════════════════════════════════════
-# 3. 리스크 매니저 테스트
-# ══════════════════════════════════════════════════════════════
+
+
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+# 3. ???? ???? ????????
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+
+
 
 
 class TestRiskManager(unittest.TestCase):
-    """risk/manager.py 테스트"""
+
+    """risk/manager.py ????????"""
+
+
 
     def setUp(self):
+
         self.risk_config = MagicMock()
+
         self.risk_config.max_position_size = 2_000_000
+
         self.risk_config.max_daily_loss = -100_000
+
         self.risk_config.max_positions = 5
+
         self.risk_config.min_confidence = 0.6
+
         self.risk_config.min_roe = 0.0
+
         self.risk_config.require_profitable = False
+
         self.risk_config.max_debt_ratio = 0.0
 
+
+
         self.db = MagicMock()
+
         self.session_mock = MagicMock()
+
         self.db.get_session.return_value = self.session_mock
 
+
+
     def test_daily_loss_limit(self):
+
         import datetime as dt_mod
+
         from risk.manager import RiskManager
+
         rm = RiskManager(self.risk_config, self.db)
-        rm._daily_reset_date = dt_mod.date.today()  # 리셋 방지
-        rm._daily_pnl = -200_000  # 이미 한도 초과
+
+        rm._daily_reset_date = dt_mod.date.today()  # ???? ??
+
+        rm._daily_pnl = -200_000  # ???? ???? ???
+
+
 
         from strategies.base import Signal, SignalType
+
         signal = Signal(
+
             type=SignalType.BUY,
+
             stock_code="005930",
+
             price=50000,
+
             confidence=0.8,
+
         )
 
+
+
         result = rm.check_signal(signal, 10_000_000)
+
         self.assertEqual(result.type, SignalType.HOLD,
-                         "일일 손실 한도 초과 시 HOLD 반환해야 함")
+
+                         "???? ?????? ???? ??? ?? HOLD ????? ??")
+
+
 
     def test_position_sizing(self):
+
         from risk.manager import RiskManager
+
         from strategies.base import Signal, SignalType
 
+
+
         rm = RiskManager(self.risk_config, self.db)
+
         rm._daily_pnl = 0
 
-        # 포지션 수 질의 모킹 (filter_by().count() / filter_by().first() 모두 처리)
+
+
+        # ?????? ?? ? ? (filter_by().count() / filter_by().first() ? ?)
+
         filter_mock = MagicMock()
+
         filter_mock.count.return_value = 0
+
         filter_mock.first.return_value = None
+
         query_mock = MagicMock()
+
         query_mock.filter_by.return_value = filter_mock
+
         self.session_mock.query.return_value = query_mock
 
+
+
         signal = Signal(
+
             type=SignalType.BUY,
+
             stock_code="005930",
+
             price=50000,
+
             confidence=0.8,
+
         )
 
+
+
         result = rm.check_signal(signal, 10_000_000)
+
         if result.type == SignalType.BUY:
+
             cost = result.quantity * result.price
+
             self.assertLessEqual(cost, self.risk_config.max_position_size,
-                                 "포지션 금액이 한도를 초과하면 안 됨")
-            self.assertGreater(result.quantity, 0, "포지션 크기는 양수여야 함")
+
+                                 "?????? ??? ???? ??????? ?? ??")
+
+            self.assertGreater(result.quantity, 0, "?????? ? ???????? ??")
 
 
-# ══════════════════════════════════════════════════════════════
-# 4. 백테스트 엔진 테스트
-# ══════════════════════════════════════════════════════════════
+
+
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+# 4. ??????? ?? ????????
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+
+
 
 
 class TestBacktestEngine(unittest.TestCase):
-    """backtest/engine.py 테스트"""
+
+    """backtest/engine.py ????????"""
+
+
 
     def setUp(self):
+
         from features.indicators import add_all_indicators
+
         self.df = add_all_indicators(make_ohlcv(500, base_price=50000))
 
+
+
     def test_backtest_run(self):
+
         from backtest.engine import BacktestEngine
+
         from strategies.scalping import ScalpingStrategy
+
+
 
         strategy = ScalpingStrategy()
 
+
+
         engine = BacktestEngine(strategy, initial_capital=10_000_000)
+
         metrics = engine.run(self.df)
 
+
+
         self.assertIsNotNone(metrics)
+
         self.assertGreater(metrics.initial_capital, 0)
+
         self.assertIsNotNone(metrics.total_return_pct)
+
         self.assertIsNotNone(metrics.max_drawdown_pct)
+
         self.assertGreaterEqual(metrics.total_trades, 0)
 
+
+
     def test_cost_model(self):
+
         from backtest.engine import CostModel
+
+
 
         model = CostModel()
 
+
+
         buy_cost = model.buy_cost(50000, 10)
-        self.assertGreater(buy_cost, 0, "매수 비용은 양수")
+
+        self.assertGreater(buy_cost, 0, "? ???? ????")
+
+
 
         sell_cost = model.sell_cost(50000, 10)
-        self.assertGreater(sell_cost, 0, "매도 비용은 양수")
+
+        self.assertGreater(sell_cost, 0, "? ???? ????")
+
+
 
     def test_monte_carlo(self):
+
         from backtest.engine import BacktestEngine
+
         from strategies.scalping import ScalpingStrategy
+
+
 
         strategy = ScalpingStrategy()
 
+
+
         engine = BacktestEngine(strategy, initial_capital=10_000_000)
+
         _ = engine.run(self.df)
 
+
+
         if engine.strategy:
+
             mc = engine.monte_carlo(self.df, n_simulations=50)
+
             if "error" not in mc:
+
                 self.assertIn("prob_profit", mc)
+
                 self.assertIn("mean_return_pct", mc)
 
 
-# ══════════════════════════════════════════════════════════════
-# 5. 설정 테스트
-# ══════════════════════════════════════════════════════════════
+
+
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+# 5. ???? ????????
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+
+
 
 
 class TestConfig(unittest.TestCase):
-    """config/settings.py 테스트"""
+
+    """config/settings.py ????????"""
+
+
 
     def test_load_config_defaults(self):
+
         from config.settings import load_config
+
         config = load_config()
+
+
 
         self.assertIsNotNone(config.kis)
+
         self.assertIsNotNone(config.db)
+
         self.assertIsNotNone(config.risk)
+
         self.assertIsNotNone(config.strategy)
+
         self.assertIn(config.kis.trading_mode, ["paper", "live"])
 
+
+
     def test_risk_config_values(self):
+
         from config.settings import load_config
+
         config = load_config()
 
+
+
         self.assertGreater(config.risk.max_position_size, 0)
+
         self.assertLess(config.risk.max_daily_loss, 0)
+
         self.assertGreater(config.risk.max_positions, 0)
 
 
-# ══════════════════════════════════════════════════════════════
-# 6. 데이터 수집기 테스트 (Mock)
-# ══════════════════════════════════════════════════════════════
+
+
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+# 6. ?????? ??? ???????? (Mock)
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+
+
 
 
 class TestDataCollector(unittest.TestCase):
-    """data/collector.py 모킹 테스트"""
+
+    """data/collector.py ? ????????"""
+
+
 
     @patch("data.collector.requests.post")
+
     def test_auth_token(self, mock_post):
+
         mock_post.return_value = MagicMock(
+
             status_code=200,
+
             json=MagicMock(return_value={
+
                 "access_token": "test_token_123",
+
                 "token_type": "Bearer",
+
                 "expires_in": 86400,
+
             })
+
         )
 
+
+
         from data.collector import KISAuth
+
         config = MagicMock()
+
         config.app_key = "test_key"
+
         config.app_secret = "test_secret"
+
         config.base_url = "https://openapivts.koreainvestment.com:29443"
 
+
+
         auth = KISAuth(config)
-        token = auth.access_token  # property 접근 시 _issue_token() 호출
+
+        token = auth.access_token  # property ???? ?? _issue_token() ????
+
+
 
         self.assertEqual(token, "test_token_123")
 
+
+
     @patch("data.collector.requests.get")
+
     def test_current_price(self, mock_get):
+
         mock_get.return_value = MagicMock(
+
             status_code=200,
+
             json=MagicMock(return_value={
+
                 "rt_cd": "0",
+
                 "output": {
+
                     "stck_prpr": "72000",
-                    "hts_kor_isnm": "삼성전자",
+
+                    "hts_kor_isnm": "????????",
+
                     "prdy_vrss": "1000",
+
                     "prdy_ctrt": "1.41",
+
                     "acml_vol": "12345678",
+
                     "acml_tr_pbmn": "100000000000",
+
                     "stck_oprc": "71000",
+
                     "stck_hgpr": "72500",
+
                     "stck_lwpr": "70500",
+
                 }
+
             })
+
         )
 
+
+
         from data.collector import KISDataCollector, KISAuth
+
         auth = MagicMock(spec=KISAuth)
+
         auth.access_token = "test_token"
+
         auth.config = MagicMock()
+
         auth.config.app_key = "key"
+
         auth.config.app_secret = "secret"
+
         auth.config.base_url = "https://openapivts.koreainvestment.com:29443"
 
+
+
         collector = KISDataCollector(auth)
+
         result = collector.get_current_price("005930")
+
+
 
         self.assertEqual(result["price"], 72000)
 
 
-# ══════════════════════════════════════════════════════════════
-# 7. 데이터베이스 테스트 (SQLite In-Memory)
-# ══════════════════════════════════════════════════════════════
+
+
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+# 7. ??????? ???????? (SQLite In-Memory)
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+
+
 
 
 class TestDatabase(unittest.TestCase):
-    """data/database.py SQLite 인메모리 테스트"""
+
+    """data/database.py SQLite ????? ????????"""
+
+
 
     def test_create_tables(self):
+
         from data.database import Database, Trade
+
         from config.settings import DBConfig
+
+
 
         config = DBConfig(use_sqlite=True, sqlite_path=":memory:")
 
+
+
         db = Database(config)
+
         db.init_db()
 
+
+
         session = db.get_session()
+
         trade = Trade(
+
             stock_code="005930",
-            stock_name="삼성전자",
+
+            stock_name="????????",
+
             strategy="scalping",
+
             side="BUY",
+
             price=72000,
+
             quantity=10,
+
             fee=108,
+
             tax=0,
+
             executed_at=datetime.now(),
+
         )
+
         session.add(trade)
+
         session.commit()
 
+
+
         loaded = session.query(Trade).first()
+
         self.assertEqual(loaded.stock_code, "005930")
+
         self.assertEqual(loaded.price, 72000)
+
         session.close()
 
 
-# ══════════════════════════════════════════════════════════════
-# 8. WebSocket 파싱 테스트
-# ══════════════════════════════════════════════════════════════
+
+
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+# 8. WebSocket ???? ????????
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+
+
 
 
 class TestWebSocketParsing(unittest.TestCase):
-    """data/websocket_client.py 파싱 테스트"""
+
+    """data/websocket_client.py ???? ????????"""
+
+
 
     def _make_ws(self):
+
         from data.websocket_client import KISWebSocket
+
         auth = MagicMock()
+
         auth.config = MagicMock()
+
         auth.config.base_url = "https://openapivts.koreainvestment.com:29443"
+
         auth.config.ws_url = "ws://ops.koreainvestment.com:31000"
+
         return KISWebSocket(auth)
 
+
+
     def test_parse_tick_field_indices(self):
-        """체결 데이터의 ask/bid 가격 인덱스가 공식 API 스펙과 일치하는지 확인"""
+
+        """? ???????? ask/bid ???? ???????? ??? API ???????? ??????? ????"""
+
         ws = self._make_ws()
-        # H0STCNT0 columns: [0]종목코드 [1]시간 [2]현재가 [3]부호 [4]전일대비
-        # [5]등락률 [6]가중평균가 [7]시가 [8]고가 [9]저가
-        # [10]ASKP1 [11]BIDP1 [12]체결량 [13]누적거래량 ... [19]매도체결금액
+
+        # H0STCNT0 columns: [0]???? [1]???? [2]?????? [3]???? [4]?????????
+
+        # [5]?????? [6]????? [7]???? [8]???? [9]?????
+
+        # [10]ASKP1 [11]BIDP1 [12]??? [13]??????? ... [19]???
+
         fields = ["005930", "100000", "72000", "2", "1000",
+
                   "1.41", "71500", "71000", "72500", "70500",
+
                   "72100", "71900", "500", "12345678", "100000000000",
+
                   "100", "200", "100", "55.5", "50000000", "60000000"]
+
         raw = f"0|H0STCNT0|001|{'%5E'.replace('%5E','^').join(fields)}"
+
         # Rebuild raw correctly
+
         raw = "0|H0STCNT0|001|" + "^".join(fields)
 
+
+
         tick = ws._parse_tick(raw)
+
         self.assertIsNotNone(tick)
+
         self.assertEqual(tick.ask_price, 72100)   # items[10] = ASKP1
+
         self.assertEqual(tick.bid_price, 71900)   # items[11] = BIDP1
+
         self.assertEqual(tick.price, 72000)        # items[2]
+
         self.assertEqual(tick.volume, 500)         # items[12]
+
         self.assertEqual(tick.acc_volume, 12345678) # items[13]
 
+
+
     def test_parse_orderbook_consecutive_layout(self):
-        """호가 데이터가 연속 블록 배치 (공식 API 스펙)에 맞게 파싱되는지 확인"""
+
+        """???? ?????? ???? ? ? (??? API ????)?? ? ?????????? ????"""
+
         ws = self._make_ws()
-        # H0STASP0 columns: [0]종목코드 [1]시간 [2]시간구분
+
+        # H0STASP0 columns: [0]???? [1]???? [2]?????
+
         # [3~12]ASKP1~10, [13~22]BIDP1~10, [23~32]ASKP_RSQN1~10,
+
         # [33~42]BIDP_RSQN1~10, [43]TOTAL_ASKP, [44]TOTAL_BIDP, ...
+
         items = ["005930", "100000", "0"]
+
         ask_p = [str(72000 + i * 100) for i in range(10)]    # [3~12]
+
         bid_p = [str(71900 - i * 100) for i in range(10)]    # [13~22]
+
         ask_v = [str(1000 + i * 10) for i in range(10)]      # [23~32]
+
         bid_v = [str(2000 + i * 10) for i in range(10)]      # [33~42]
+
         totals = ["15000", "25000"]                           # [43,44]
-        # 남은 필드 (45~58) 패딩
+
+        # ????? ???? (45~58) ????
+
         padding = ["0"] * 14
 
+
+
         items = items + ask_p + bid_p + ask_v + bid_v + totals + padding
+
         raw = "0|H0STASP0|001|" + "^".join(items)
 
+
+
         ob = ws._parse_orderbook(raw)
+
         self.assertIsNotNone(ob)
+
         self.assertEqual(ob.ask_prices[0], 72000)   # ASKP1
+
         self.assertEqual(ob.ask_prices[9], 72900)   # ASKP10
+
         self.assertEqual(ob.bid_prices[0], 71900)   # BIDP1
+
         self.assertEqual(ob.bid_prices[9], 71000)   # BIDP10
+
         self.assertEqual(ob.ask_volumes[0], 1000)   # ASKP_RSQN1
+
         self.assertEqual(ob.bid_volumes[0], 2000)   # BIDP_RSQN1
+
         self.assertEqual(ob.total_ask_volume, 15000)
+
         self.assertEqual(ob.total_bid_volume, 25000)
 
 
-# ══════════════════════════════════════════════════════════════
+
+
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+# ???? ? ???????? (Phase 1~4)
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+
+
+
+
+class TestBubbleDetector(unittest.TestCase):
+
+    """features/bubble_detector.py ???????? (?)"""
+
+
+
+    def setUp(self):
+
+        from features.bubble_detector import (
+
+            BubbleDetector, OverheatDetector, CascadeRiskAnalyzer,
+
+            LeverageRiskMonitor, PassiveFundCascadeEstimator,
+
+            BubblePhase,
+
+        )
+
+        self.BubbleDetector = BubbleDetector
+
+        self.OverheatDetector = OverheatDetector
+
+        self.CascadeRiskAnalyzer = CascadeRiskAnalyzer
+
+        self.LeverageRiskMonitor = LeverageRiskMonitor
+
+        self.PassiveFundCascadeEstimator = PassiveFundCascadeEstimator
+
+        self.BubblePhase = BubblePhase
+
+        self.df = make_ohlcv(300)
+
+
+
+    def test_overheat_detector_returns_score(self):
+
+        """????? ???? 0-100 ?????? ???????"""
+
+        detector = self.OverheatDetector()
+
+        score = detector.analyze(self.df)
+
+        self.assertGreaterEqual(score, 0.0)
+
+        self.assertLessEqual(score, 100.0)
+
+
+
+    def test_cascade_risk_returns_score(self):
+
+        """???? ? ???? 0-100 ?????? ???????"""
+
+        analyzer = self.CascadeRiskAnalyzer()
+
+        score = analyzer.analyze(self.df)
+
+        self.assertGreaterEqual(score, 0.0)
+
+        self.assertLessEqual(score, 100.0)
+
+
+
+    def test_bubble_detector_normal_market(self):
+
+        """???? ???? ?????????? NORMAL ???? EUPHORIA ???????"""
+
+        detector = self.BubbleDetector()
+
+        signal = detector.analyze(self.df)
+
+        self.assertIn(signal.phase, [
+
+            self.BubblePhase.NORMAL,
+
+            self.BubblePhase.EUPHORIA,
+
+        ])
+
+        self.assertGreater(signal.position_multiplier, 0.0)
+
+        self.assertLessEqual(signal.position_multiplier, 1.0)
+
+
+
+    def test_bubble_detector_crash_data(self):
+
+        """? ?????????? BURST/PANIC ????????"""
+
+        # ? ?????? ????
+
+        df = make_ohlcv(300, base_price=100000)
+
+        # ???? 20?? ? (-30%)
+
+        for i in range(280, 300):
+
+            df.loc[i, "close"] *= 0.985 ** (i - 279)
+
+            df.loc[i, "open"] = df.loc[i, "close"] * 0.98
+
+            df.loc[i, "low"] = df.loc[i, "close"] * 0.97
+
+            df.loc[i, "volume"] *= 5  # ??? ??
+
+        detector = self.BubbleDetector()
+
+        signal = detector.analyze(df)
+
+        # ? ?? ?????? ??? 1.0 ??????? ??
+
+        self.assertLess(signal.position_multiplier, 1.0)
+
+        self.assertGreater(signal.bubble_score, 0)
+
+
+
+    def test_bubble_signal_has_warning(self):
+
+        """? ????? ??? ????? ??????????"""
+
+        detector = self.BubbleDetector()
+
+        signal = detector.analyze(self.df)
+
+        self.assertIsInstance(signal.warning_message, str)
+
+        self.assertGreater(len(signal.warning_message), 0)
+
+
+
+
+
+class TestExchangeRate(unittest.TestCase):
+
+    """features/exchange_rate.py ???????? (???)"""
+
+
+
+    def setUp(self):
+
+        from features.exchange_rate import (
+
+            ExchangeRateAnalyzer, DollarCycleAnalyzer,
+
+            FXAlarmSystem, RiskBarometer, BiasCorrector,
+
+            DollarCyclePhase,
+
+        )
+
+        self.ExchangeRateAnalyzer = ExchangeRateAnalyzer
+
+        self.DollarCycleAnalyzer = DollarCycleAnalyzer
+
+        self.FXAlarmSystem = FXAlarmSystem
+
+        self.RiskBarometer = RiskBarometer
+
+        self.BiasCorrector = BiasCorrector
+
+        self.DollarCyclePhase = DollarCyclePhase
+
+        self.df = make_ohlcv(300)
+
+
+
+    def test_dollar_strength_returns_score(self):
+
+        """???? ? 0-100 ?????"""
+
+        analyzer = self.DollarCycleAnalyzer()
+
+        strength = analyzer.analyze_dollar_strength(self.df)
+
+        self.assertGreaterEqual(strength, 0.0)
+
+        self.assertLessEqual(strength, 100.0)
+
+
+
+    def test_fx_alarm_no_alarm_normal(self):
+
+        """???? ?????????? ???? ? ???"""
+
+        alarm_sys = self.FXAlarmSystem(threshold_pct=5.0)
+
+        alarm, pct = alarm_sys.check_alarm(self.df)
+
+        # ???? ??????? 5% ? (np.bool_ ????)
+
+        self.assertTrue(isinstance(alarm, (bool, np.bool_)))
+
+        self.assertGreaterEqual(pct, 0.0)
+
+
+
+    def test_risk_barometer_range(self):
+
+        """?????????? 0-100 ?????"""
+
+        barometer = self.RiskBarometer()
+
+        appetite = barometer.get_risk_appetite(self.df)
+
+        self.assertGreaterEqual(appetite, 0.0)
+
+        self.assertLessEqual(appetite, 100.0)
+
+
+
+    def test_leverage_guard(self):
+
+        """????? ???? 1.5x ?????? ???????"""
+
+        corrector = self.BiasCorrector()
+
+        result = corrector.enforce_leverage_guard(2.0)
+
+        self.assertEqual(result, 1.5)
+
+        result2 = corrector.enforce_leverage_guard(1.2)
+
+        self.assertEqual(result2, 1.2)
+
+
+
+    def test_exchange_rate_analyzer_full(self):
+
+        """???? ???? ??? ????? ???? ???????"""
+
+        analyzer = self.ExchangeRateAnalyzer()
+
+        signal = analyzer.analyze(self.df)
+
+        self.assertIsInstance(signal.dollar_phase, self.DollarCyclePhase)
+
+        self.assertGreater(signal.position_multiplier, 0.0)
+
+        self.assertLessEqual(signal.leverage_guard, 1.5)
+
+
+
+
+
+class TestExecutionAnalysis(unittest.TestCase):
+
+    """features/execution_analysis.py ???????? (??? ?)"""
+
+
+
+    def setUp(self):
+
+        from features.execution_analysis import (
+
+            ExecutionAnalyzer, CANSLIMScreener,
+
+            PEGCalculator, TimeBasedStrategy,
+
+            CandleForceAnalyzer,
+
+        )
+
+        self.ExecutionAnalyzer = ExecutionAnalyzer
+
+        self.CANSLIMScreener = CANSLIMScreener
+
+        self.PEGCalculator = PEGCalculator
+
+        self.TimeBasedStrategy = TimeBasedStrategy
+
+        self.CandleForceAnalyzer = CandleForceAnalyzer
+
+        self.df = make_ohlcv(300)
+
+
+
+    def test_canslim_score_range(self):
+
+        """CANSLIM ?????? 0-100 ?????"""
+
+        screener = self.CANSLIMScreener()
+
+        score = screener.analyze(self.df)
+
+        self.assertGreaterEqual(score.total, 0.0)
+
+        self.assertLessEqual(score.total, 100.0)
+
+
+
+    def test_peg_proxy_returns_float(self):
+
+        """PEG ????? ???? float?? ???????"""
+
+        calc = self.PEGCalculator()
+
+        peg = calc.calculate_peg_proxy(self.df)
+
+        self.assertIsInstance(peg, float)
+
+        self.assertGreater(peg, 0.0)
+
+
+
+    def test_time_strategy_returns_valid(self):
+
+        """???? ?????? ???????? ? ???????"""
+
+        strategy = self.TimeBasedStrategy()
+
+        result = strategy.get_optimal_time_window(self.df)
+
+        self.assertIn(result, ["MORNING", "AFTERNOON", "NEUTRAL"])
+
+
+
+    def test_execution_analyzer_full(self):
+
+        """???? ? ??? ????? ???? ???????"""
+
+        analyzer = self.ExecutionAnalyzer()
+
+        signal = analyzer.analyze(self.df)
+
+        self.assertIsInstance(signal.canslim_score, float)
+
+        self.assertIsInstance(signal.peg_ratio, float)
+
+        self.assertIn(signal.optimal_time,
+
+                      ["MORNING", "AFTERNOON", "NEUTRAL"])
+
+
+
+
+
+class TestBookIntegrator(unittest.TestCase):
+
+    """features/book_integrator.py ???????? (9?? ???? ????)"""
+
+
+
+    def setUp(self):
+
+        from features.book_integrator import (
+
+            BookIntegrator, ConflictResolver,
+
+            SignalWeightManager, DEFAULT_WEIGHTS,
+
+        )
+
+        self.BookIntegrator = BookIntegrator
+
+        self.ConflictResolver = ConflictResolver
+
+        self.SignalWeightManager = SignalWeightManager
+
+        self.DEFAULT_WEIGHTS = DEFAULT_WEIGHTS
+
+        self.df = make_ohlcv(300)
+
+
+
+    def test_default_weights_sum_to_one(self):
+
+        """? ??? ???? 1.0????"""
+
+        total = sum(self.DEFAULT_WEIGHTS.values())
+
+        self.assertAlmostEqual(total, 1.0, places=5)
+
+
+
+    def test_integrator_no_signals(self):
+
+        """??? ?????? ???? ??? ??????????"""
+
+        integrator = self.BookIntegrator()
+
+        result = integrator.integrate(self.df, {})
+
+        self.assertIsInstance(result.composite_score, float)
+
+        self.assertIn(result.action, [
+
+            "STRONG_BUY", "BUY", "HOLD",
+
+            "SELL", "STRONG_SELL", "BLOCK",
+
+        ])
+
+        self.assertGreater(result.position_multiplier, 0.0)
+
+
+
+    def test_conflict_resolver(self):
+
+        """?? ?????? ????? ????????"""
+
+        resolver = self.ConflictResolver()
+
+        # ? PANIC ??? ?
+
+        from features.bubble_detector import BubbleSignal, BubblePhase
+
+        bubble = BubbleSignal(
+
+            phase=BubblePhase.PANIC,
+
+            bubble_score=85,
+
+            overheat_score=90,
+
+            leverage_risk=80,
+
+            cascade_risk=75,
+
+            passive_risk=60,
+
+            position_multiplier=0.1,
+
+            warning_message="????!",
+
+        )
+
+        signals = {"bubble_detector": bubble}
+
+        conflicts = resolver.resolve(signals)
+
+        self.assertIsInstance(conflicts, list)
+
+
+
+
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+# ?????? - ???? ????????? (QuantValue)
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+
+
+class TestQuantValue(unittest.TestCase):
+
+    """?????? ?????? ? ????????"""
+
+
+
+    def setUp(self):
+
+        from features.quant_value import (
+
+            QuantValueAnalyzer, QuantValueSignal,
+
+            ValuePercentileScorer, ProfitabilityScorer,
+
+            GrowthAnalyzer, SafetyAnalyzer,
+
+            MomentumScorer, CalendarEffectAdjuster,
+
+        )
+
+        self.Analyzer = QuantValueAnalyzer
+
+        self.Signal = QuantValueSignal
+
+        self.ValueScorer = ValuePercentileScorer
+
+        self.ProfitScorer = ProfitabilityScorer
+
+        self.GrowthAnalyzer = GrowthAnalyzer
+
+        self.SafetyAnalyzer = SafetyAnalyzer
+
+        self.MomentumScorer = MomentumScorer
+
+        self.CalendarAdjuster = CalendarEffectAdjuster
+
+        self.df = make_ohlcv(300)
+
+
+
+    def test_analyzer_basic(self):
+
+        """?????? ??? ? ????"""
+
+        analyzer = self.Analyzer()
+
+        sig = analyzer.analyze(self.df)
+
+        self.assertIsInstance(sig, self.Signal)
+
+        self.assertGreaterEqual(sig.composite_score, 0.0)
+
+        self.assertLessEqual(sig.composite_score, 1.0)
+
+        self.assertGreaterEqual(sig.position_multiplier, 0.5)
+
+        self.assertLessEqual(sig.position_multiplier, 1.5)
+
+
+
+    def test_insufficient_data(self):
+
+        """  ?? ???? ?"""
+
+        short_df = make_ohlcv(10)
+
+        analyzer = self.Analyzer()
+
+        sig = analyzer.analyze(short_df)
+
+        self.assertIsInstance(sig, self.Signal)
+
+        self.assertEqual(sig.note, "데이터 부족")
+
+
+
+    def test_individual_scorers(self):
+
+        """??? ????? 0~1 ? ????"""
+
+        val = self.ValueScorer().score(self.df)
+
+        profit = self.ProfitScorer().score(self.df)
+
+        growth = self.GrowthAnalyzer().score(self.df)
+
+        safety = self.SafetyAnalyzer().score(self.df)
+
+        momentum = self.MomentumScorer().score(self.df)
+
+        calendar = self.CalendarAdjuster().adjust(self.df)
+
+
+
+        for name, s in [("val", val), ("profit", profit),
+
+                        ("growth", growth), ("safety", safety),
+
+                        ("momentum", momentum)]:
+
+            self.assertGreaterEqual(s, 0.0, f"{name} < 0")
+
+            self.assertLessEqual(s, 1.0, f"{name} > 1")
+
+        self.assertGreaterEqual(calendar, 0.9)
+
+        self.assertLessEqual(calendar, 1.1)
+
+
+
+    def test_deep_value_flag(self):
+
+        """??? ?????? ????? ????? ????"""
+
+        analyzer = self.Analyzer(deep_value_threshold=0.0)
+
+        sig = analyzer.analyze(self.df)
+
+        self.assertIsInstance(sig.is_deep_value, bool)
+
+
+
+
+
+class TestWallStreetQuant(unittest.TestCase):
+
+    """???? ???? ???????? ????? ? ????????"""
+
+
+
+    def setUp(self):
+
+        from features.wall_street_quant import (
+
+            WallStreetQuantAnalyzer, WallStreetQuantSignal,
+
+            SmartBetaFactorScorer, BehavioralBiasDetector,
+
+            FactorRiskDecomposer,
+
+        )
+
+        self.Analyzer = WallStreetQuantAnalyzer
+
+        self.Signal = WallStreetQuantSignal
+
+        self.FactorScorer = SmartBetaFactorScorer
+
+        self.BiasDetector = BehavioralBiasDetector
+
+        self.RiskDecomposer = FactorRiskDecomposer
+
+        self.df = make_ohlcv(300)
+
+
+
+    def test_analyzer_basic(self):
+
+        """???????? ????? ??? ? ????"""
+
+        analyzer = self.Analyzer()
+
+        sig = analyzer.analyze(self.df)
+
+        self.assertIsInstance(sig, self.Signal)
+
+        self.assertGreaterEqual(sig.composite_score, 0.0)
+
+        self.assertLessEqual(sig.composite_score, 1.0)
+
+        self.assertGreaterEqual(sig.position_multiplier, 0.5)
+
+        self.assertLessEqual(sig.position_multiplier, 1.5)
+
+
+
+    def test_insufficient_data(self):
+
+        """  ?? ???? ?"""
+
+        short_df = make_ohlcv(10)
+
+        analyzer = self.Analyzer()
+
+        sig = analyzer.analyze(short_df)
+
+        self.assertIsInstance(sig, self.Signal)
+
+        self.assertEqual(sig.note, "insufficient data")
+
+
+
+    def test_smart_beta_factors(self):
+
+        """????? 5???? ? ????"""
+
+        scorer = self.FactorScorer()
+
+        factors = scorer.score_all(self.df)
+
+        for name in ["value", "momentum", "size", "quality", "low_vol"]:
+
+            self.assertIn(name, factors)
+
+            self.assertGreaterEqual(factors[name], 0.0, f"{name} < 0")
+
+            self.assertLessEqual(factors[name], 1.0, f"{name} > 1")
+
+
+
+    def test_behavioral_bias_detection(self):
+
+        """???????? ?? ???? ?"""
+
+        detector = self.BiasDetector()
+
+        result = detector.detect(self.df)
+
+        self.assertIn("total", result)
+
+        self.assertGreaterEqual(result["total"], 0.0)
+
+        self.assertLessEqual(result["total"], 1.0)
+
+        self.assertIn("types", result)
+
+
+
+
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+# Book 2: ???? ????? - ??? ??????
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+
+
+
+
+class TestGrahamInvestor(unittest.TestCase):
+
+    """???? ????? ??? ?????? ? ????????"""
+
+
+
+    def setUp(self):
+
+        from features.graham_investor import (
+
+            GrahamInvestorAnalyzer, GrahamInvestorSignal,
+
+            MarginOfSafetyScorer, DefensiveScreener, MrMarketDetector,
+
+        )
+
+        self.GrahamInvestorAnalyzer = GrahamInvestorAnalyzer
+
+        self.GrahamInvestorSignal = GrahamInvestorSignal
+
+        self.MarginOfSafetyScorer = MarginOfSafetyScorer
+
+        self.DefensiveScreener = DefensiveScreener
+
+        self.MrMarketDetector = MrMarketDetector
+
+        self.df = make_ohlcv(300)
+
+
+
+    def test_analyzer_basic(self):
+
+        """???? ??? ? ????"""
+
+        analyzer = self.GrahamInvestorAnalyzer(lookback=240)
+
+        sig = analyzer.analyze(self.df)
+
+        self.assertIsInstance(sig, self.GrahamInvestorSignal)
+
+        self.assertGreaterEqual(sig.composite_score, 0)
+
+        self.assertLessEqual(sig.composite_score, 1)
+
+        self.assertGreaterEqual(sig.margin_of_safety, 0)
+
+        self.assertLessEqual(sig.margin_of_safety, 1)
+
+
+
+    def test_insufficient_data(self):
+
+        """  ?? ??? ?"""
+
+        short_df = make_ohlcv(10)
+
+        analyzer = self.GrahamInvestorAnalyzer(lookback=240)
+
+        sig = analyzer.analyze(short_df)
+
+        self.assertEqual(sig.note, "데이터 부족")
+
+
+
+    def test_margin_of_safety(self):
+
+        """????? ???? ??"""
+
+        scorer = self.MarginOfSafetyScorer(lookback=240)
+
+        score = scorer.score(self.df)
+
+        self.assertGreaterEqual(score, 0)
+
+        self.assertLessEqual(score, 1)
+
+
+
+    def test_mr_market_detection(self):
+
+        """??? ? ???/???? ??"""
+
+        detector = self.MrMarketDetector(lookback=60)
+
+        fear, greed = detector.detect(self.df)
+
+        self.assertGreaterEqual(fear, 0)
+
+        self.assertLessEqual(fear, 1)
+
+        self.assertGreaterEqual(greed, 0)
+
+        self.assertLessEqual(greed, 1)
+
+
+
+
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+# Book 3: ???????? ???? - ???? ???? ?????? ???
+
+# ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+
+
+
+
+class TestBeatTheMarket(unittest.TestCase):
+
+    """???????? ???? ???? ??? ? ????????"""
+
+
+
+    def setUp(self):
+
+        from features.beat_the_market import (
+
+            BeatTheMarketAnalyzer, BeatTheMarketSignal,
+
+            KellyCriterionSizer, EarningsYieldComparator, StatArbDetector,
+
+        )
+
+        self.BeatTheMarketAnalyzer = BeatTheMarketAnalyzer
+
+        self.BeatTheMarketSignal = BeatTheMarketSignal
+
+        self.KellyCriterionSizer = KellyCriterionSizer
+
+        self.EarningsYieldComparator = EarningsYieldComparator
+
+        self.StatArbDetector = StatArbDetector
+
+        self.df = make_ohlcv(300)
+
+
+
+    def test_analyzer_basic(self):
+
+        """???? ??? ? ????"""
+
+        analyzer = self.BeatTheMarketAnalyzer(lookback=240)
+
+        sig = analyzer.analyze(self.df)
+
+        self.assertIsInstance(sig, self.BeatTheMarketSignal)
+
+        self.assertGreaterEqual(sig.composite_score, 0)
+
+        self.assertLessEqual(sig.composite_score, 1)
+
+
+
+    def test_insufficient_data(self):
+
+        """  ?? ??? ?"""
+
+        short_df = make_ohlcv(10)
+
+        analyzer = self.BeatTheMarketAnalyzer(lookback=240)
+
+        sig = analyzer.analyze(short_df)
+
+        self.assertEqual(sig.note, "데이터 부족")
+
+
+
+    def test_kelly_criterion(self):
+
+        """??? ?? ?????? ??????"""
+
+        sizer = self.KellyCriterionSizer(lookback=120)
+
+        kelly = sizer.calculate(self.df)
+
+        self.assertGreaterEqual(kelly, 0)
+
+        self.assertLessEqual(kelly, 1)
+
+
+
+    def test_earnings_yield(self):
+
+        """?????????? ??? ????"""
+
+        comparator = self.EarningsYieldComparator(lookback=240)
+
+        score = comparator.score(self.df)
+
+        self.assertGreaterEqual(score, 0)
+
+        self.assertLessEqual(score, 1)
+
+
+
+
+
+# ??????????????????????????????????????????????????????????????
+
+
+
+
+
+class TestAFML(unittest.TestCase):
+
+    """AFML (meta_labeling) module tests"""
+
+
+
+    def setUp(self):
+
+        try:
+
+            from features.meta_labeling import (
+
+                AFMLAnalyzer,
+
+                MetaLabelSignal,
+
+                CUSUMFilter,
+
+                TripleBarrierLabeler,
+
+            )
+
+            self.AFMLAnalyzer = AFMLAnalyzer
+
+            self.MetaLabelSignal = MetaLabelSignal
+
+            self.CUSUMFilter = CUSUMFilter
+
+            self.TripleBarrierLabeler = TripleBarrierLabeler
+
+            self.df = make_ohlcv(200)
+
+        except ImportError:
+
+            self.skipTest("meta_labeling not available")
+
+
+
+    def test_analyzer_basic(self):
+
+        analyzer = self.AFMLAnalyzer()
+
+        sig = analyzer.analyze(self.df)
+
+        self.assertIsInstance(sig, self.MetaLabelSignal)
+
+        self.assertGreaterEqual(sig.meta_probability, 0)
+
+        self.assertLessEqual(sig.meta_probability, 1)
+
+
+
+    def test_insufficient_data(self):
+
+        short_df = make_ohlcv(5)
+
+        analyzer = self.AFMLAnalyzer()
+
+        sig = analyzer.analyze(short_df)
+
+        self.assertIsInstance(sig, self.MetaLabelSignal)
+
+
+
+    def test_cusum_filter(self):
+
+        filt = self.CUSUMFilter(threshold=0.02)
+
+        events = filt.detect_events(self.df["close"])
+
+        self.assertIsInstance(events, pd.Series)
+
+
+
+    def test_triple_barrier(self):
+
+        labeler = self.TripleBarrierLabeler()
+
+        result = labeler.apply(self.df)
+
+        self.assertIsInstance(result, pd.DataFrame)
+
+
+
+
+
+class TestMLAlpha(unittest.TestCase):
+
+    """ML Alpha module tests"""
+
+
+
+    def setUp(self):
+
+        try:
+
+            from features.ml_alpha import (
+
+                MLAlphaAnalyzer,
+
+                MLAlphaSignal,
+
+                AlphaFactorGenerator,
+
+            )
+
+            self.MLAlphaAnalyzer = MLAlphaAnalyzer
+
+            self.MLAlphaSignal = MLAlphaSignal
+
+            self.AlphaFactorGenerator = AlphaFactorGenerator
+
+            self.df = make_ohlcv(200)
+
+        except ImportError:
+
+            self.skipTest("ml_alpha not available")
+
+
+
+    def test_analyzer_basic(self):
+
+        analyzer = self.MLAlphaAnalyzer()
+
+        sig = analyzer.analyze(self.df)
+
+        self.assertIsInstance(sig, self.MLAlphaSignal)
+
+        self.assertGreaterEqual(sig.ensemble_score, 0)
+
+        self.assertLessEqual(sig.ensemble_score, 1)
+
+
+
+    def test_insufficient_data(self):
+
+        short_df = make_ohlcv(5)
+
+        analyzer = self.MLAlphaAnalyzer()
+
+        sig = analyzer.analyze(short_df)
+
+        self.assertIsInstance(sig, self.MLAlphaSignal)
+
+
+
+    def test_alpha_factors(self):
+
+        gen = self.AlphaFactorGenerator()
+
+        factors = gen.generate_all(self.df)
+
+        self.assertIsInstance(factors, pd.DataFrame)
+
+        self.assertGreater(len(factors.columns), 0)
+
+
+
+
+
+class TestKRQuant(unittest.TestCase):
+
+    """KR Quant Factors module tests"""
+
+
+
+    def setUp(self):
+
+        try:
+
+            from features.kr_quant_factors import (
+
+                KRQuantAnalyzer,
+
+                KRQuantSignal,
+
+                ValueFactorK,
+
+                MomentumFactorK,
+
+            )
+
+            self.KRQuantAnalyzer = KRQuantAnalyzer
+
+            self.KRQuantSignal = KRQuantSignal
+
+            self.ValueFactorK = ValueFactorK
+
+            self.MomentumFactorK = MomentumFactorK
+
+            self.df = make_ohlcv(300)
+
+        except ImportError:
+
+            self.skipTest("kr_quant_factors not available")
+
+
+
+    def test_analyzer_basic(self):
+
+        analyzer = self.KRQuantAnalyzer()
+
+        sig = analyzer.analyze(self.df)
+
+        self.assertIsInstance(sig, self.KRQuantSignal)
+
+        self.assertGreaterEqual(sig.composite_score, 0)
+
+        self.assertLessEqual(sig.composite_score, 1)
+
+
+
+    def test_insufficient_data(self):
+
+        short_df = make_ohlcv(5)
+
+        analyzer = self.KRQuantAnalyzer()
+
+        sig = analyzer.analyze(short_df)
+
+        self.assertIsInstance(sig, self.KRQuantSignal)
+
+
+
+    def test_momentum_factor(self):
+
+        mom = self.MomentumFactorK()
+
+        score = mom.score(self.df)
+
+        self.assertIsInstance(score, (int, float))
+
+
+
+    def test_value_factor(self):
+
+        val = self.ValueFactorK()
+
+        score = val.score(self.df)
+
+        self.assertIsInstance(score, (int, float))
+
+
+
+
+
+class TestBacktestAnalytics(unittest.TestCase):
+
+    """Backtest Analytics module tests"""
+
+
+
+    def setUp(self):
+
+        try:
+
+            from features.backtest_analytics import (
+
+                BacktestAnalyzer,
+
+                BacktestAnalyticsSignal,
+
+                KellyCriterion,
+
+                TransactionCostModel,
+
+            )
+
+            self.BacktestAnalyzer = BacktestAnalyzer
+
+            self.BacktestAnalyticsSignal = BacktestAnalyticsSignal
+
+            self.KellyCriterion = KellyCriterion
+
+            self.TransactionCostModel = TransactionCostModel
+
+            self.df = make_ohlcv(300)
+
+        except ImportError:
+
+            self.skipTest("backtest_analytics not available")
+
+
+
+    def test_analyzer_basic(self):
+
+        analyzer = self.BacktestAnalyzer()
+
+        sig = analyzer.analyze(self.df)
+
+        self.assertIsInstance(sig, self.BacktestAnalyticsSignal)
+
+        self.assertGreaterEqual(sig.kelly_fraction, 0)
+
+
+
+    def test_insufficient_data(self):
+
+        short_df = make_ohlcv(5)
+
+        analyzer = self.BacktestAnalyzer()
+
+        sig = analyzer.analyze(short_df)
+
+        self.assertIsInstance(sig, self.BacktestAnalyticsSignal)
+
+
+
+    def test_kelly_criterion(self):
+
+        kelly = self.KellyCriterion()
+
+        returns = self.df["close"].pct_change().dropna()
+
+        full_k, half_k = kelly.compute(returns)
+
+        self.assertIsInstance(full_k, float)
+
+        self.assertGreaterEqual(half_k, 0)
+
+
+
+    def test_transaction_cost(self):
+
+        model = self.TransactionCostModel()
+
+        cost = model.total_cost_per_trade(
+
+            trade_value=50000000,
+
+            avg_daily_volume=1000000000,
+
+            daily_volatility=0.02,
+
+        )
+
+        self.assertIsInstance(cost, float)
+
+        self.assertGreater(cost, 0)
+
+
+
+
+
+class TestSignalValidator(unittest.TestCase):
+
+    """Signal Validator module tests"""
+
+
+
+    def setUp(self):
+
+        try:
+
+            from features.signal_validator import (
+
+                SignalValidator,
+
+                SignalValidationSignal,
+
+                BinomialTest,
+
+                MultipleTesting,
+
+            )
+
+            self.SignalValidator = SignalValidator
+
+            self.SignalValidationSignal = SignalValidationSignal
+
+            self.BinomialTest = BinomialTest
+
+            self.MultipleTesting = MultipleTesting
+
+        except ImportError:
+
+            self.skipTest("signal_validator not available")
+
+
+
+    def test_validator_basic(self):
+
+        validator = self.SignalValidator()
+
+        results = {"signal_a": (30, 50), "signal_b": (20, 50)}
+
+        sig = validator.validate_all(results)
+
+        self.assertIsInstance(sig, self.SignalValidationSignal)
+
+        self.assertGreaterEqual(sig.valid_signal_ratio, 0)
+
+        self.assertLessEqual(sig.valid_signal_ratio, 1)
+
+
+
+    def test_binomial(self):
+
+        test = self.BinomialTest()
+
+        z_score, p_val, is_sig = test.test(successes=30, trials=50)
+
+        self.assertIsInstance(p_val, float)
+
+        self.assertGreaterEqual(p_val, 0)
+
+        self.assertLessEqual(p_val, 1)
+
+
+
+    def test_multiple_testing(self):
+
+        mt = self.MultipleTesting()
+
+        p_values = [0.01, 0.04, 0.06, 0.10, 0.50]
+
+        rejected = mt.bonferroni(p_values, alpha=0.05)
+
+        self.assertIsInstance(rejected, list)
+
+
+
+    def test_empty_signals(self):
+
+        validator = self.SignalValidator()
+
+        sig = validator.validate_all({})
+
+        self.assertIsInstance(sig, self.SignalValidationSignal)
+
+        self.assertEqual(sig.total_signals_tested, 0)
+
+
+
+
+
+# ??????????????????????????????????????????????????????????????
+
+
+
 
 
 if __name__ == "__main__":
+
     unittest.main(verbosity=2)
+

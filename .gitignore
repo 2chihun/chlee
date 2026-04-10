@@ -42,10 +42,40 @@ ai_trader/tools/*.txt
 ai_trader/tools/*.log
 ai_trader/.pytest_cache/
 
+# Captures (2.4GB - 별도 이관)
+captures/
+
+# Archives
+*.7z
+*.zip
+*.tar.gz
+
+# Backup files
+*.bak
+*.orig
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# OCR environments (captures 내 가상환경)
+.venv_bookocr/
+.venv_easyocr/
+
 # Ginseng/Lens projects (별도 관리)
 ginseng_erp/
 lens_wholesale/
 
+# FIRE project (별도 관리)
+FIRE/
+
+# OCR / temporary outputs
+ocr_outputs/
+_texts_all/
+tessdata/
+compare_diffs/
+
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
